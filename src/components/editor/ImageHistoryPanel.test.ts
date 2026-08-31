@@ -16,6 +16,7 @@ describe('ImageHistoryPanel', () => {
     expect(wrapper.findAll('[data-testid="history-image"]')).toHaveLength(2)
     expect(wrapper.text()).toContain('640 × 640')
     expect(wrapper.text()).toContain('1280 × 720')
+    expect(wrapper.text()).toContain('最多保留最近 50 张')
   })
 
   it('emits select immediately but waits for confirmation before deleting one image', async () => {

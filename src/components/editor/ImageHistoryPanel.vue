@@ -49,7 +49,7 @@
       <small>上传过的图片会显示在这里</small>
     </div>
 
-    <footer>最多保留最近 20 张</footer>
+    <footer>最多保留最近 50 张</footer>
 
     <AppConfirmDialog
       :open="Boolean(pendingAction)"

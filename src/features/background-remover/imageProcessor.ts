@@ -117,37 +117,10 @@ export const removeConnectedBackground = (
   if (!background) return result
 
   const safeTolerance = Math.max(0, Math.min(442, tolerance))
-  const visited = new Uint8Array(result.width * result.height)
-  const queue = new Uint32Array(result.width * result.height)
-  let readIndex = 0
-  let writeIndex = 0
-
-  const enqueue = (index: number): void => {
-    if (visited[index] || !matchesBackground(result, index, background, safeTolerance)) return
-    visited[index] = 1
-    queue[writeIndex] = index
-    writeIndex += 1
-  }
-
-  for (let x = 0; x < result.width; x += 1) {
-    enqueue(x)
-    enqueue((result.height - 1) * result.width + x)
-  }
-  for (let y = 1; y < result.height - 1; y += 1) {
-    enqueue(y * result.width)
-    enqueue(y * result.width + result.width - 1)
-  }
-
-  while (readIndex < writeIndex) {
-    const index = queue[readIndex] ?? 0
-    readIndex += 1
-    result.data[index * 4 + 3] = 0
-    const x = index % result.width
-    const y = Math.floor(index / result.width)
-    if (x > 0) enqueue(index - 1)
-    if (x + 1 < result.width) enqueue(index + 1)
-    if (y > 0) enqueue(index - result.width)
-    if (y + 1 < result.height) enqueue(index + result.width)
+  for (let index = 0; index < result.width * result.height; index += 1) {
+    if (matchesBackground(result, index, background, safeTolerance)) {
+      result.data[index * 4 + 3] = 0
+    }
   }
 
   return result

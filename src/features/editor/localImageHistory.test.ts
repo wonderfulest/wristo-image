@@ -48,6 +48,16 @@ describe('LocalImageHistoryRepository', () => {
     expect(storage.entries.some(item => item.id === 'image-1')).toBe(false)
   })
 
+  it('keeps the latest 50 images by default', async () => {
+    const storage = new MemoryHistoryStorage()
+    const repository = new LocalImageHistoryRepository(storage)
+
+    for (let index = 1; index <= 51; index += 1) await repository.save(entry(index))
+
+    expect(await repository.list()).toHaveLength(50)
+    expect(storage.entries.some(item => item.id === 'image-1')).toBe(false)
+  })
+
   it('deletes one image or clears all local images', async () => {
     const storage = new MemoryHistoryStorage()
     storage.entries = [entry(1), entry(2)]

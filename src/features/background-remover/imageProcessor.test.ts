@@ -50,7 +50,7 @@ describe('removeConnectedBackground', () => {
     expect(alphaAt(result, 2, 2)).toBe(255)
   })
 
-  it('preserves a background-colored detail enclosed inside the subject', () => {
+  it('clears a background-colored region enclosed inside the subject', () => {
     const black = [0, 0, 0, 255] as const
     const orange = [250, 100, 10, 255] as const
     const source = pixelImage([
@@ -63,7 +63,7 @@ describe('removeConnectedBackground', () => {
 
     const result = removeConnectedBackground(source, { x: 0, y: 0, width: 5, height: 5 }, 12)
 
-    expect(alphaAt(result, 2, 2)).toBe(255)
+    expect(alphaAt(result, 2, 2)).toBe(0)
   })
 
   it('keeps a subject edge that differs from the dominant border color', () => {

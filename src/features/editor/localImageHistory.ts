@@ -18,7 +18,7 @@ export interface LocalImageHistoryStorage {
 export class LocalImageHistoryRepository {
   constructor(
     private readonly storage: LocalImageHistoryStorage,
-    private readonly limit = 20,
+    private readonly limit = 50,
   ) {}
 
   async list(): Promise<LocalImageHistoryEntry[]> {

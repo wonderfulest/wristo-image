@@ -44,6 +44,15 @@
       </div>
       <span class="topbar-local"><i /> 本地处理</span>
       <button
+        data-testid="save-canvas-button"
+        class="topbar-save"
+        type="button"
+        :disabled="!sourceImage || isSavingCanvas"
+        @click="saveCurrentCanvas"
+      >
+        {{ isSavingCanvas ? "保存中…" : "保存" }}
+      </button>
+      <button
         data-testid="download-button"
         class="topbar-download"
         type="button"
@@ -183,7 +192,7 @@
               type="color"
             />
           </label>
-          <p>{{ selection ? '调整颜色或容差可实时预览' : '在画布上框选要填色的背景区域' }}</p>
+          <p>每次框选后立即填色，可连续框选；修改颜色会用于下一次框选。</p>
         </section>
 
         <section
@@ -430,10 +439,10 @@
           class="workspace-stage"
           :class="{ checkerboard: previewImage, panning: isPanning }"
           @wheel.prevent="onWheel"
-          @pointerdown="startPan"
-          @pointermove="movePan"
-          @pointerup="endPan"
-          @pointercancel="endPan"
+          @pointerdown.capture="onStagePointerDown"
+          @pointermove.capture="onStagePointerMove"
+          @pointerup.capture="onStagePointerUp"
+          @pointercancel.capture="onStagePointerCancel"
         >
           <canvas
             v-show="sourceImage && !previewImage"
@@ -522,7 +531,7 @@
         </div>
         <footer class="workspace-footer">
           <span>最大 25 MB · 8192 × 8192 px</span
-          ><span>滚轮缩放 · 中键拖动画布</span>
+          ><span>滚轮缩放 · 长按或中键拖动画布</span>
         </footer>
       </section>
       <ImageHistoryPanel
@@ -621,6 +630,10 @@ import {
 import { consumeWheelZoom } from "@/features/editor/zoomControl";
 import { resolveBrushCursor } from "@/features/editor/brushCursor";
 import {
+  createCanvasHistoryName,
+  encodePixelImageAsPng,
+} from "@/features/editor/canvasHistorySave";
+import {
   applyContentAwareErase,
   applyRefineBrush,
   renderCutout,
@@ -683,6 +696,15 @@ const panStart = ref<{
   panX: number;
   panY: number;
 } | null>(null);
+const LONG_PRESS_PAN_DELAY_MS = 300;
+const LONG_PRESS_MOVE_THRESHOLD_PX = 5;
+let longPressPanTimer: ReturnType<typeof setTimeout> | null = null;
+let pendingLongPress: {
+  x: number;
+  y: number;
+  pointerId: number;
+  startsToolGesture: boolean;
+} | null = null;
 const resizeWidth = ref(1);
 const resizeHeight = ref(1);
 const lockRatio = ref(true);
@@ -691,6 +713,7 @@ const exportFormat = ref<ImageExportFormat>("png");
 const exportQuality = ref(90);
 const exportWidth = ref(1);
 const exportHeight = ref(1);
+const isSavingCanvas = ref(false);
 const localHistoryEntries = ref<LocalImageHistoryEntry[]>([]);
 const localHistoryImages = ref<ImageHistoryPanelItem[]>([]);
 const isBrushTool = (toolId: EditorToolDefinition["id"]): boolean =>
@@ -804,10 +827,6 @@ watch([outputAspectRatio, trimWhitespace, tolerance], () => {
   if (activeTool.value.id === "background-remover" && previewImage.value) void showPreview();
 });
 
-watch(backgroundFillColor, () => {
-  if (activeTool.value.id === "background-fill" && selection.value) processBackgroundFill();
-});
-
 const pixelImageFromBitmap = (bitmap: ImageBitmap): PixelImage => {
   const canvas = document.createElement("canvas");
   canvas.width = bitmap.width;
@@ -884,7 +903,10 @@ onMounted(() => {
   });
 });
 
-onBeforeUnmount(revokeHistoryPreviewUrls);
+onBeforeUnmount(() => {
+  revokeHistoryPreviewUrls();
+  if (longPressPanTimer) clearTimeout(longPressPanTimer);
+});
 
 const showPreview = async (): Promise<void> => {
   await nextTick();
@@ -1019,6 +1041,34 @@ const clearImageHistory = async (): Promise<void> => {
   await refreshLocalImageHistory();
 };
 
+const saveCurrentCanvas = async (): Promise<void> => {
+  const current = sourceImage.value;
+  if (!current || !localImageHistoryRepository || isSavingCanvas.value) return;
+  isSavingCanvas.value = true;
+  errorMessage.value = "";
+  try {
+    const savedAt = new Date();
+    const createdAt = savedAt.getTime();
+    const name = createCanvasHistoryName(fileName.value, savedAt);
+    const blob = await encodePixelImageAsPng(current);
+    await localImageHistoryRepository.save({
+      id: `${createdAt}-${crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)}`,
+      name,
+      mimeType: "image/png",
+      width: current.width,
+      height: current.height,
+      createdAt,
+      blob,
+    });
+    await refreshLocalImageHistory();
+    toolNotice.value = "当前画布已保存到历史记录";
+  } catch {
+    errorMessage.value = "无法保存当前画布，请检查浏览器存储空间后重试。";
+  } finally {
+    isSavingCanvas.value = false;
+  }
+};
+
 const pointInImage = (event: PointerEvent): { x: number; y: number } | null => {
   const canvas = editorCanvas.value;
   if (!canvas) return null;
@@ -1087,7 +1137,7 @@ const finishSelection = (event: PointerEvent): void => {
   }
   selection.value = normalized;
   if (activeTool.value.id === "background-remover") processSelection();
-  if (activeTool.value.id === "background-fill") processBackgroundFill();
+  if (activeTool.value.id === "background-fill") applyBackgroundFill();
   drawEditor();
 };
 
@@ -1114,17 +1164,15 @@ const processSelection = (): void => {
   void showPreview();
 };
 
-const processBackgroundFill = (): void => {
+const applyBackgroundFill = (): void => {
   if (!sourceImage.value || !selection.value) return;
   const filled = fillSelectionWithColor(
     sourceImage.value,
     selection.value,
     backgroundFillColor.value,
   );
-  toolSession.value = new CanvasToolSession(sourceImage.value);
-  previewImage.value = toolSession.value.preview(filled);
+  commitImage(filled);
   errorMessage.value = "";
-  void showPreview();
 };
 
 const pointInPreviewSubject = (
@@ -1373,6 +1421,89 @@ const endPan = (): void => {
   panStart.value = null;
 };
 
+const clearPendingLongPress = (): void => {
+  if (longPressPanTimer) clearTimeout(longPressPanTimer);
+  longPressPanTimer = null;
+  pendingLongPress = null;
+};
+
+const beginToolGesture = (start: NonNullable<typeof pendingLongPress>): void => {
+  if (!start.startsToolGesture) return;
+  const event = {
+    button: 0,
+    clientX: start.x,
+    clientY: start.y,
+    pointerId: start.pointerId,
+  } as PointerEvent;
+  if (previewImage.value) startRefine(event);
+  else startSelection(event);
+};
+
+const onStagePointerDown = (event: PointerEvent): void => {
+  if (event.button === 1) {
+    startPan(event);
+    return;
+  }
+  if (event.button !== 0 || !sourceImage.value) return;
+  if ((event.target as HTMLElement).closest(".canvas-zoom-controls")) return;
+
+  event.stopPropagation();
+  clearPendingLongPress();
+  pendingLongPress = {
+    x: event.clientX,
+    y: event.clientY,
+    pointerId: event.pointerId,
+    startsToolGesture:
+      event.target === editorCanvas.value || event.target === previewCanvas.value,
+  };
+  longPressPanTimer = setTimeout(() => {
+    const start = pendingLongPress;
+    if (!start) return;
+    pendingLongPress = null;
+    longPressPanTimer = null;
+    isRefining.value = false;
+    refineStrokePoints.value = [];
+    selectionStart.value = null;
+    isPanning.value = true;
+    panStart.value = {
+      x: start.x,
+      y: start.y,
+      panX: panX.value,
+      panY: panY.value,
+    };
+    workspaceStage.value?.setPointerCapture(start.pointerId);
+  }, LONG_PRESS_PAN_DELAY_MS);
+};
+
+const onStagePointerMove = (event: PointerEvent): void => {
+  const pending = pendingLongPress;
+  if (pending) {
+    const distance = Math.hypot(event.clientX - pending.x, event.clientY - pending.y);
+    if (distance > LONG_PRESS_MOVE_THRESHOLD_PX) {
+      clearPendingLongPress();
+      beginToolGesture(pending);
+    }
+  }
+  movePan(event);
+};
+
+const onStagePointerUp = (): void => {
+  const pending = pendingLongPress;
+  if (pending) {
+    clearPendingLongPress();
+    beginToolGesture(pending);
+  }
+  endPan();
+};
+
+const onStagePointerCancel = (): void => {
+  clearPendingLongPress();
+  isRefining.value = false;
+  refineStrokePoints.value = [];
+  selectionStart.value = null;
+  endPan();
+};
+
 const openExport = (): void => {
   const current = sourceImage.value;
   if (!current) return;
@@ -1533,6 +1664,24 @@ const downloadExport = (): void => {
   padding: 10px 16px;
   font-weight: 750;
   cursor: pointer;
+}
+.topbar-save {
+  border: 1px solid #d9dde2;
+  border-radius: 8px;
+  background: #fff;
+  color: #4d5660;
+  padding: 9px 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.topbar-save:hover:not(:disabled) {
+  border-color: #ff9d59;
+  color: #dd6816;
+}
+.topbar-save:disabled {
+  color: #aeb4bb;
+  background: #f2f3f4;
+  cursor: not-allowed;
 }
 .topbar-download:disabled {
   background: #c8ccd1;

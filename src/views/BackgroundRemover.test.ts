@@ -15,6 +15,7 @@ describe('ImageEditor', () => {
     expect(wrapper.get('[data-testid="tool-panel"]').text()).toContain('快速抠图')
     expect(wrapper.get('input[type="file"]').attributes('accept')).toBe('image/png,image/jpeg,image/webp')
     expect(wrapper.get('[data-testid="download-button"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-testid="save-canvas-button"]').attributes('disabled')).toBeDefined()
     expect(wrapper.text()).toContain('图片仅在当前浏览器中处理')
     expect(wrapper.get('[data-testid="image-history-panel"]').text()).toContain('历史图片')
     expect(wrapper.get('[data-testid="image-history-panel"]').text()).toContain('仅保存在当前浏览器')
@@ -74,6 +75,52 @@ describe('ImageEditor', () => {
     expect(controls.findAll('button').every(button => button.attributes('disabled') !== undefined)).toBe(true)
   })
 
+  it('pans from anywhere after a 300ms primary-button hold without completing the active tool gesture', async () => {
+    vi.useFakeTimers()
+    const pixels = new Uint8ClampedArray(4 * 4 * 4).fill(255)
+    vi.stubGlobal('createImageBitmap', vi.fn(async () => ({ width: 4, height: 4, close: vi.fn() })))
+    vi.stubGlobal('ImageData', class { constructor(public data: Uint8ClampedArray, public width: number, public height: number) {} })
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+      drawImage: vi.fn(),
+      getImageData: vi.fn(() => ({ width: 4, height: 4, data: pixels })),
+      putImageData: vi.fn(),
+      save: vi.fn(), restore: vi.fn(), beginPath: vi.fn(), rect: vi.fn(), fill: vi.fn(),
+      strokeRect: vi.fn(), setLineDash: vi.fn(),
+    } as unknown as CanvasRenderingContext2D)
+
+    const wrapper = mount(ImageEditor)
+    const input = wrapper.get('input[type="file"]')
+    Object.defineProperty(input.element, 'files', {
+      value: [new File(['image'], 'icon.png', { type: 'image/png' })],
+      configurable: true,
+    })
+    await input.trigger('change')
+    await vi.waitFor(() => expect(wrapper.get('[data-tool-id="smart-erase"]').attributes('disabled')).toBeUndefined())
+
+    const stage = wrapper.get('.workspace-stage')
+    const canvas = wrapper.get('.workspace-stage canvas:not(.result-canvas)')
+    vi.spyOn(canvas.element, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, width: 4, height: 4 } as DOMRect)
+    Object.defineProperty(canvas.element, 'setPointerCapture', { value: vi.fn(), configurable: true })
+    Object.defineProperty(stage.element, 'setPointerCapture', { value: vi.fn(), configurable: true })
+
+    canvas.element.dispatchEvent(new MouseEvent('pointerdown', {
+      bubbles: true, button: 0, clientX: 2, clientY: 2,
+    }))
+    vi.advanceTimersByTime(300)
+    canvas.element.dispatchEvent(new MouseEvent('pointermove', {
+      bubbles: true, buttons: 1, clientX: 32, clientY: 22,
+    }))
+    canvas.element.dispatchEvent(new MouseEvent('pointerup', {
+      bubbles: true, button: 0, clientX: 32, clientY: 22,
+    }))
+    await wrapper.vm.$nextTick()
+
+    expect(canvas.attributes('style')).toContain('translate(30px, 20px)')
+    expect(wrapper.find('[data-testid="tool-preview-actions"]').exists()).toBe(false)
+    expect(wrapper.get('.history-actions button[title="撤销"]').attributes('disabled')).toBeDefined()
+    vi.useRealTimers()
+  })
+
   it('organizes every supported tool into cutout and adjustment categories', async () => {
     const wrapper = mount(ImageEditor)
     const rail = wrapper.get('[data-testid="tool-rail"]')
@@ -124,7 +171,23 @@ describe('ImageEditor', () => {
     expect(wrapper.get('[data-testid="background-fill-color"]').attributes('type')).toBe('color')
     expect((wrapper.get('[data-testid="background-fill-color"]').element as HTMLInputElement).value).toBe('#ffffff')
     expect(wrapper.find('[data-testid="background-fill-tolerance"]').exists()).toBe(false)
-    expect(wrapper.text()).toContain('在画布上框选要填色的背景区域')
+    expect(wrapper.text()).toContain('每次框选后立即填色，可连续框选')
+    expect(wrapper.find('[data-testid="tool-preview-actions"]').exists()).toBe(false)
+
+    const editorCanvas = wrapper.get('.workspace-stage canvas:not(.result-canvas)')
+    vi.spyOn(editorCanvas.element, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, width: 4, height: 4 } as DOMRect)
+    Object.defineProperty(editorCanvas.element, 'setPointerCapture', { value: vi.fn(), configurable: true })
+    editorCanvas.element.dispatchEvent(new MouseEvent('pointerdown', { button: 0, clientX: 0, clientY: 0 }))
+    editorCanvas.element.dispatchEvent(new MouseEvent('pointerup', { clientX: 4, clientY: 4 }))
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('[data-testid="tool-preview-actions"]').exists()).toBe(false)
+    expect(wrapper.get('.history-actions button[title="撤销"]').attributes('disabled')).toBeUndefined()
+
+    editorCanvas.element.dispatchEvent(new MouseEvent('pointerdown', { button: 0, clientX: 0, clientY: 0 }))
+    editorCanvas.element.dispatchEvent(new MouseEvent('pointerup', { clientX: 4, clientY: 4 }))
+    await wrapper.vm.$nextTick()
+    await wrapper.get('.history-actions button[title="撤销"]').trigger('click')
+    expect(wrapper.get('.history-actions button[title="撤销"]').attributes('disabled')).toBeUndefined()
 
     await wrapper.get('[data-tool-id="smart-erase"]').trigger('click')
     expect(wrapper.get('[data-testid="tool-preview-actions"]').text()).toContain('应用到画布')
