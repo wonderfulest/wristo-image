@@ -129,6 +129,7 @@ import { computed, nextTick, ref } from 'vue'
 import { editorTools, resolveEditorTool, type EditorToolDefinition } from '@/features/editor/toolRegistry'
 import { ImageHistory } from '@/features/editor/imageHistory'
 import { cropImage, flipImage, resizeImage, rotateImage } from '@/features/editor/imageOperations'
+import { consumeWheelZoom } from '@/features/editor/zoomControl'
 import { validateImageDimensions, validateImageFile } from '@/features/background-remover/fileValidation'
 import {
   normalizeSelection,
@@ -152,6 +153,7 @@ const activeTool = ref(resolveEditorTool('background-remover'))
 const history = ref<ImageHistory | null>(null)
 const historyRevision = ref(0)
 const viewScale = ref(1)
+const wheelRemainder = ref(0)
 const panX = ref(0)
 const panY = ref(0)
 const isPanning = ref(false)
@@ -360,7 +362,12 @@ const syncResize = (changed: 'width' | 'height'): void => {
 const applyResize = (): void => { if (sourceImage.value) commitImage(resizeImage(sourceImage.value, resizeWidth.value, resizeHeight.value)) }
 const changeZoom = (delta: number): void => { viewScale.value = Math.max(.1, Math.min(8, Math.round((viewScale.value + delta) * 10) / 10)) }
 const fitView = (): void => { viewScale.value = 1; panX.value = 0; panY.value = 0 }
-const onWheel = (event: WheelEvent): void => { if (sourceImage.value) changeZoom(event.deltaY > 0 ? -.1 : .1) }
+const onWheel = (event: WheelEvent): void => {
+  if (!sourceImage.value) return
+  const result = consumeWheelZoom(wheelRemainder.value, event.deltaY)
+  wheelRemainder.value = result.remainder
+  if (result.steps) changeZoom(result.steps * .1)
+}
 const startPan = (event: PointerEvent): void => {
   if (event.button !== 1 || !sourceImage.value) return
   event.preventDefault()
