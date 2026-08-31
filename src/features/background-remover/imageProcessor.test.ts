@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   applyCutoutOutputOptions,
+  fillSelectionWithColor,
   normalizeSelection,
   removeConnectedBackground,
   trimTransparentBounds,
@@ -78,6 +79,40 @@ describe('removeConnectedBackground', () => {
 
     expect(alphaAt(result, 2, 0)).toBe(255)
     expect(alphaAt(result, 0, 0)).toBe(0)
+  })
+})
+
+describe('fillSelectionWithColor', () => {
+  it('fills every pixel inside the selection, including foreground content', () => {
+    const black = [0, 0, 0, 255] as const
+    const orange = [250, 100, 10, 255] as const
+    const source = pixelImage([
+      [black, black, black, black, black],
+      [black, orange, orange, orange, black],
+      [black, orange, black, orange, black],
+      [black, orange, orange, orange, black],
+      [black, black, black, black, black],
+    ].map(row => row.map(pixel => [...pixel] as [number, number, number, number])))
+
+    const result = fillSelectionWithColor(source, { x: 0, y: 0, width: 5, height: 5 }, '#ffffff')
+
+    expect(Array.from(result.data.slice(0, 4))).toEqual([255, 255, 255, 255])
+    expect(Array.from(result.data.slice((2 * 5 + 2) * 4, (2 * 5 + 2) * 4 + 4))).toEqual([255, 255, 255, 255])
+    expect(Array.from(result.data.slice((2 * 5 + 1) * 4, (2 * 5 + 1) * 4 + 4))).toEqual([255, 255, 255, 255])
+  })
+
+  it('does not modify matching pixels outside the selection', () => {
+    const black = [0, 0, 0, 255] as const
+    const source = pixelImage([[black, black, black, black]].map(row => row.map(pixel => [...pixel] as [number, number, number, number])))
+
+    const result = fillSelectionWithColor(source, { x: 1, y: 0, width: 2, height: 1 }, '#ff0000')
+
+    expect(Array.from(result.data)).toEqual([
+      0, 0, 0, 255,
+      255, 0, 0, 255,
+      255, 0, 0, 255,
+      0, 0, 0, 255,
+    ])
   })
 })
 

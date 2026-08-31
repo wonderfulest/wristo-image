@@ -18,16 +18,41 @@ describe('ImageHistoryPanel', () => {
     expect(wrapper.text()).toContain('1280 × 720')
   })
 
-  it('emits select, delete and clear actions', async () => {
+  it('emits select immediately but waits for confirmation before deleting one image', async () => {
     const wrapper = mount(ImageHistoryPanel, { props: { images } })
 
     await wrapper.findAll('[data-testid="history-image"]')[0]!.trigger('click')
     await wrapper.findAll('[data-testid="delete-history-image"]')[0]!.trigger('click')
-    await wrapper.get('[data-testid="clear-image-history"]').trigger('click')
 
     expect(wrapper.emitted('select')?.[0]).toEqual(['new'])
+    expect(wrapper.emitted('delete')).toBeUndefined()
+    expect(document.body.querySelector('[role="dialog"]')?.textContent).toContain('new.png')
+
+    document.body.querySelector<HTMLButtonElement>('[data-testid="app-confirm-cancel"]')!.click()
+    await wrapper.vm.$nextTick()
+    expect(wrapper.emitted('delete')).toBeUndefined()
+
+    await wrapper.findAll('[data-testid="delete-history-image"]')[0]!.trigger('click')
+    document.body.querySelector<HTMLButtonElement>('[data-testid="app-confirm-submit"]')!.click()
+    await wrapper.vm.$nextTick()
+
     expect(wrapper.emitted('delete')?.[0]).toEqual(['new'])
+    wrapper.unmount()
+  })
+
+  it('waits for confirmation before clearing every history image', async () => {
+    const wrapper = mount(ImageHistoryPanel, { props: { images } })
+
+    await wrapper.get('[data-testid="clear-image-history"]').trigger('click')
+
+    expect(wrapper.emitted('clear')).toBeUndefined()
+    expect(document.body.querySelector('[role="dialog"]')?.textContent).toContain('共 2 张')
+
+    document.body.querySelector<HTMLButtonElement>('[data-testid="app-confirm-submit"]')!.click()
+    await wrapper.vm.$nextTick()
+
     expect(wrapper.emitted('clear')).toHaveLength(1)
+    wrapper.unmount()
   })
 
   it('shows an empty state when no local images exist', () => {

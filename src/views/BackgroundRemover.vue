@@ -172,6 +172,21 @@
         </section>
 
         <section
+          v-if="activeTool.id === 'background-fill'"
+          class="panel-section operation-panel"
+        >
+          <label
+            >填充颜色
+            <input
+              data-testid="background-fill-color"
+              v-model="backgroundFillColor"
+              type="color"
+            />
+          </label>
+          <p>{{ selection ? '调整颜色或容差可实时预览' : '在画布上框选要填色的背景区域' }}</p>
+        </section>
+
+        <section
           v-if="activeTool.id === 'background-remover'"
           class="panel-section instructions"
         >
@@ -272,34 +287,19 @@
         </section>
 
         <div
-          v-if="previewImage && activeTool.id === 'background-remover'"
+          v-if="previewImage && ['background-remover', 'background-fill'].includes(activeTool.id)"
           class="result-card"
         >
-          <span>透明结果已生成</span
+          <span>{{ activeTool.id === 'background-fill' ? '背景填色预览已生成' : '透明结果已生成' }}</span
           ><strong
             >{{ renderedPreview?.width }} × {{ renderedPreview?.height }} px</strong
           >
         </div>
         <section
-          v-if="previewImage && ['refine', 'background', 'outline'].includes(activeTool.id)"
+          v-if="previewImage && ['smart-erase', 'restore', 'background', 'outline'].includes(activeTool.id)"
           class="cutout-studio"
         >
-          <div v-if="activeTool.id === 'refine'" class="effect-panel">
-            <div class="brush-modes">
-              <button
-                type="button"
-                :class="{ active: brushMode === 'erase' }"
-                @click="brushMode = 'erase'"
-              >
-                擦除</button
-              ><button
-                type="button"
-                :class="{ active: brushMode === 'restore' }"
-                @click="brushMode = 'restore'"
-              >
-                恢复
-              </button>
-            </div>
+          <div v-if="isBrushTool(activeTool.id)" class="effect-panel">
             <label
               >画笔大小
               <input
@@ -320,7 +320,8 @@
               />
               <output>{{ brushHardness }}%</output></label
             >
-            <p>直接在当前画布上拖动精修；应用后才会写入画布。</p>
+            <p v-if="activeTool.id === 'smart-erase'">智能擦除会在松开画笔后用周围背景补齐；应用后才会写入画布。</p>
+            <p v-else>恢复会从原图重新显露对应区域；应用后才会写入画布。</p>
           </div>
 
           <div v-else-if="activeTool.id === 'background'" class="effect-panel">
@@ -392,7 +393,7 @@
         </p>
         <p v-if="toolNotice" role="status" class="tool-notice">{{ toolNotice }}</p>
         <button
-          v-if="previewImage && activeTool.id === 'background-remover'"
+          v-if="previewImage && ['background-remover', 'background-fill'].includes(activeTool.id)"
           class="reselect-button"
           type="button"
           @click="reselect"
@@ -425,6 +426,7 @@
           >
         </div>
         <div
+          ref="workspaceStage"
           class="workspace-stage"
           :class="{ checkerboard: previewImage, panning: isPanning }"
           @wheel.prevent="onWheel"
@@ -446,12 +448,25 @@
             v-show="previewImage"
             ref="previewCanvas"
             class="result-canvas"
-            :class="{ refining: activeTool.id === 'refine' }"
+            :class="{ refining: isBrushTool(activeTool.id) }"
             :style="canvasTransform"
             @pointerdown="startRefine"
             @pointermove="moveRefine"
             @pointerup="finishRefine"
             @pointercancel="finishRefine"
+            @pointerenter="updateBrushCursor"
+            @pointerleave="hideBrushCursor"
+          />
+          <span
+            v-if="brushCursor"
+            data-testid="brush-cursor"
+            class="brush-cursor"
+            :style="{
+              left: `${brushCursor.left}px`,
+              top: `${brushCursor.top}px`,
+              width: `${brushCursor.diameter}px`,
+              height: `${brushCursor.diameter}px`,
+            }"
           />
           <button
             v-if="!sourceImage"
@@ -518,24 +533,14 @@
       />
     </div>
 
-    <div
-      v-if="exportOpen"
-      class="export-backdrop"
-      @click.self="exportOpen = false"
+    <AppModal
+      :open="exportOpen"
+      title="保存图片"
+      eyebrow="导出设置"
+      width="420px"
+      @close="exportOpen = false"
     >
-      <section
-        class="export-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-label="导出图片"
-      >
-        <header>
-          <div>
-            <span>导出设置</span>
-            <h2>保存图片</h2>
-          </div>
-          <button @click="exportOpen = false">×</button>
-        </header>
+      <div class="export-form">
         <label
           >格式
           <select v-model="exportFormat">
@@ -582,8 +587,8 @@
         <button class="export-confirm" @click="downloadExport">
           下载 {{ exportFormat.toUpperCase() }}
         </button>
-      </section>
-    </div>
+      </div>
+    </AppModal>
   </main>
 </template>
 
@@ -614,7 +619,9 @@ import {
   rotateImage,
 } from "@/features/editor/imageOperations";
 import { consumeWheelZoom } from "@/features/editor/zoomControl";
+import { resolveBrushCursor } from "@/features/editor/brushCursor";
 import {
+  applyContentAwareErase,
   applyRefineBrush,
   renderCutout,
   type CutoutBackground,
@@ -630,6 +637,7 @@ import {
 } from "@/features/background-remover/cutoutPreferences";
 import {
   applyCutoutOutputOptions,
+  fillSelectionWithColor,
   normalizeSelection,
   removeConnectedBackground,
   trimTransparentBounds,
@@ -639,6 +647,7 @@ import {
 import ImageHistoryPanel, {
   type ImageHistoryPanelItem,
 } from "@/components/editor/ImageHistoryPanel.vue";
+import AppModal from "@/components/ui/AppModal.vue";
 
 const savedCutoutPreferences = loadCutoutPreferences(window.localStorage);
 const localImageHistoryRepository = createLocalImageHistoryRepository();
@@ -646,6 +655,7 @@ const fileInput = ref<HTMLInputElement | null>(null);
 const backgroundInput = ref<HTMLInputElement | null>(null);
 const editorCanvas = ref<HTMLCanvasElement | null>(null);
 const previewCanvas = ref<HTMLCanvasElement | null>(null);
+const workspaceStage = ref<HTMLDivElement | null>(null);
 const sourceImage = ref<PixelImage | null>(null);
 const previewImage = ref<PixelImage | null>(null);
 const toolSession = ref<CanvasToolSession | null>(null);
@@ -683,10 +693,16 @@ const exportWidth = ref(1);
 const exportHeight = ref(1);
 const localHistoryEntries = ref<LocalImageHistoryEntry[]>([]);
 const localHistoryImages = ref<ImageHistoryPanelItem[]>([]);
-const brushMode = ref<RefineBrushMode>("erase");
+const isBrushTool = (toolId: EditorToolDefinition["id"]): boolean =>
+  toolId === "smart-erase" || toolId === "restore";
+const brushMode = computed<RefineBrushMode>(() =>
+  activeTool.value.id === "restore" ? "restore" : "erase",
+);
 const brushSize = ref(32);
 const brushHardness = ref(85);
 const isRefining = ref(false);
+const refineStrokePoints = ref<Array<{ x: number; y: number }>>([]);
+const brushPointer = ref<{ clientX: number; clientY: number } | null>(null);
 const backgroundType = ref<"transparent" | "color" | "gradient" | "image">(
   "transparent",
 );
@@ -697,6 +713,7 @@ const backgroundTypes = [
   { id: "image" as const, label: "图片" },
 ];
 const backgroundColor = ref("#ffffff");
+const backgroundFillColor = ref("#ffffff");
 const gradientFrom = ref("#ff8124");
 const gradientTo = ref("#191d24");
 const backgroundImage = ref<PixelImage | null>(null);
@@ -722,6 +739,20 @@ const categoryTools = computed(() => getCategoryTools(activeCategory.value));
 const canvasTransform = computed(() => ({
   transform: `translate(${panX.value}px, ${panY.value}px) scale(${viewScale.value})`,
 }));
+const brushCursor = computed(() => {
+  viewScale.value;
+  const pointer = brushPointer.value;
+  const canvas = previewCanvas.value;
+  const stage = workspaceStage.value;
+  if (!pointer || !canvas || !stage || !isBrushTool(activeTool.value.id)) return null;
+  return resolveBrushCursor({
+    ...pointer,
+    brushSize: brushSize.value,
+    canvasWidth: canvas.width,
+    canvasBounds: canvas.getBoundingClientRect(),
+    stageBounds: stage.getBoundingClientRect(),
+  });
+});
 const workspaceMessage = computed(() =>
   previewImage.value
     ? `${activeTool.value.title}预览（尚未应用）`
@@ -729,6 +760,8 @@ const workspaceMessage = computed(() =>
       ? "画布"
       : activeTool.value.id === "crop"
         ? "拖动鼠标创建裁剪区域"
+        : activeTool.value.id === "background-fill"
+          ? "拖动鼠标框选要填色的背景区域"
         : activeTool.value.id === "background-remover"
           ? "拖动鼠标框选要保留的图标"
           : "图片预览",
@@ -768,7 +801,11 @@ watch([outputAspectRatio, trimWhitespace, tolerance], () => {
     trimWhitespace: trimWhitespace.value,
     tolerance: tolerance.value,
   });
-  if (previewImage.value) void showPreview();
+  if (activeTool.value.id === "background-remover" && previewImage.value) void showPreview();
+});
+
+watch(backgroundFillColor, () => {
+  if (activeTool.value.id === "background-fill" && selection.value) processBackgroundFill();
 });
 
 const pixelImageFromBitmap = (bitmap: ImageBitmap): PixelImage => {
@@ -1008,7 +1045,7 @@ const pointInImage = (event: PointerEvent): { x: number; y: number } | null => {
 const startSelection = (event: PointerEvent): void => {
   if (event.button !== 0) return;
   if (
-    !["background-remover", "crop"].includes(activeTool.value.id) ||
+    !["background-remover", "background-fill", "crop"].includes(activeTool.value.id) ||
     previewImage.value
   )
     return;
@@ -1050,6 +1087,7 @@ const finishSelection = (event: PointerEvent): void => {
   }
   selection.value = normalized;
   if (activeTool.value.id === "background-remover") processSelection();
+  if (activeTool.value.id === "background-fill") processBackgroundFill();
   drawEditor();
 };
 
@@ -1076,6 +1114,19 @@ const processSelection = (): void => {
   void showPreview();
 };
 
+const processBackgroundFill = (): void => {
+  if (!sourceImage.value || !selection.value) return;
+  const filled = fillSelectionWithColor(
+    sourceImage.value,
+    selection.value,
+    backgroundFillColor.value,
+  );
+  toolSession.value = new CanvasToolSession(sourceImage.value);
+  previewImage.value = toolSession.value.preview(filled);
+  errorMessage.value = "";
+  void showPreview();
+};
+
 const pointInPreviewSubject = (
   event: PointerEvent,
 ): { x: number; y: number } | null => {
@@ -1097,6 +1148,10 @@ const refineAt = (event: PointerEvent): void => {
   if (!previewImage.value || !toolSession.value) return;
   const point = pointInPreviewSubject(event);
   if (!point) return;
+  if (brushMode.value === "erase") {
+    refineStrokePoints.value.push(point);
+    return;
+  }
   previewImage.value = toolSession.value.preview(applyRefineBrush(
     previewImage.value,
     toolSession.value.original,
@@ -1109,23 +1164,43 @@ const refineAt = (event: PointerEvent): void => {
   ));
   void showPreview();
 };
+const updateBrushCursor = (event: PointerEvent): void => {
+  if (!isBrushTool(activeTool.value.id)) return;
+  brushPointer.value = { clientX: event.clientX, clientY: event.clientY };
+};
+const hideBrushCursor = (): void => {
+  if (!isRefining.value) brushPointer.value = null;
+};
 const startRefine = (event: PointerEvent): void => {
-  if (event.button !== 0 || activeTool.value.id !== "refine") return;
+  if (event.button !== 0 || !isBrushTool(activeTool.value.id)) return;
   isRefining.value = true;
+  refineStrokePoints.value = [];
   previewCanvas.value?.setPointerCapture(event.pointerId);
   refineAt(event);
 };
 const moveRefine = (event: PointerEvent): void => {
+  updateBrushCursor(event);
   if (isRefining.value) refineAt(event);
 };
 const finishRefine = (): void => {
   if (!isRefining.value || !previewImage.value) return;
   isRefining.value = false;
+  if (brushMode.value === "erase" && refineStrokePoints.value.length && toolSession.value) {
+    previewImage.value = toolSession.value.preview(applyContentAwareErase(previewImage.value, {
+      points: refineStrokePoints.value,
+      size: brushSize.value,
+      hardness: brushHardness.value,
+    }));
+    refineStrokePoints.value = [];
+    void showPreview();
+  }
 };
 
 const cancelToolPreview = (showNotice = false): void => {
   if (previewImage.value && showNotice) toolNotice.value = "未应用的修改已取消";
   toolSession.value?.cancel();
+  brushPointer.value = null;
+  refineStrokePoints.value = [];
   toolSession.value = null;
   previewImage.value = null;
   selection.value = null;
@@ -1162,8 +1237,7 @@ const selectTool = (toolId: EditorToolDefinition["id"]): void => {
   cancelToolPreview(true);
   activeTool.value = tool;
   activeCategory.value = tool.categoryId;
-  if (tool.id === "refine") brushMode.value = "erase";
-  if (["refine", "background", "outline"].includes(tool.id)) {
+  if (["smart-erase", "restore", "background", "outline"].includes(tool.id)) {
     toolSession.value = new CanvasToolSession(sourceImage.value);
     previewImage.value = toolSession.value.rendered;
   }
@@ -1760,6 +1834,7 @@ const downloadExport = (): void => {
   border-radius: 5px;
 }
 .workspace-stage {
+  position: relative;
   min-height: 0;
   display: flex;
   align-items: center;
@@ -1966,13 +2041,15 @@ const downloadExport = (): void => {
   font-size: 11px;
 }
 .operation-panel input[type="number"],
-.export-dialog input[type="number"],
-.export-dialog select {
+.export-form input[type="number"],
+.export-form select {
   min-width: 0;
   border: 1px solid #d9dde1;
   border-radius: 6px;
   padding: 8px;
   background: #fff;
+  color: #394049;
+  color-scheme: light;
 }
 .operation-panel .lock-row {
   display: flex;
@@ -2067,44 +2144,11 @@ const downloadExport = (): void => {
   margin-left: 3px;
   font-size: 10px;
 }
-.export-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 20;
-  background: rgba(24, 28, 32, 0.48);
-  display: grid;
-  place-items: center;
-}
-.export-dialog {
-  width: min(390px, calc(100vw - 32px));
-  background: #fff;
-  border-radius: 14px;
-  padding: 22px;
-  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.28);
+.export-form {
   display: grid;
   gap: 16px;
 }
-.export-dialog header {
-  display: flex;
-  align-items: start;
-  justify-content: space-between;
-}
-.export-dialog header span {
-  font-size: 10px;
-  color: #929aa3;
-}
-.export-dialog h2 {
-  margin: 3px 0 0;
-  font: 650 23px "Bricolage Grotesque Variable";
-}
-.export-dialog header button {
-  border: 0;
-  background: transparent;
-  font-size: 24px;
-  color: #828a92;
-  cursor: pointer;
-}
-.export-dialog > label {
+.export-form > label {
   display: grid;
   grid-template-columns: 60px 1fr auto;
   align-items: center;
@@ -2123,7 +2167,7 @@ const downloadExport = (): void => {
   color: #68717a;
   font-size: 10px;
 }
-.export-dialog p {
+.export-form p {
   margin: 0;
   color: #818992;
   font-size: 10px;
@@ -2208,7 +2252,6 @@ const downloadExport = (): void => {
   font-size: 9px;
   line-height: 1.5;
 }
-.brush-modes,
 .background-types {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
@@ -2217,7 +2260,6 @@ const downloadExport = (): void => {
 .background-types {
   grid-template-columns: repeat(4, 1fr);
 }
-.brush-modes button,
 .background-types button,
 .upload-background {
   border: 1px solid #dfe3e7;
@@ -2228,7 +2270,6 @@ const downloadExport = (): void => {
   font-size: 10px;
   cursor: pointer;
 }
-.brush-modes button.active,
 .background-types button.active {
   border-color: #ff9d59;
   background: #fff0e6;
@@ -2239,7 +2280,17 @@ const downloadExport = (): void => {
   color: #d95f0b;
 }
 .result-canvas.refining {
-  cursor: crosshair;
+  cursor: none;
+}
+.brush-cursor {
+  position: absolute;
+  z-index: 2;
+  box-sizing: border-box;
+  border: 1.5px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.85), 0 1px 4px rgba(0, 0, 0, 0.5);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
 }
 @media (max-width: 850px) {
   .editor-body {

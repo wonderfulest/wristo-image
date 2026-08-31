@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { PixelImage } from './imageProcessor'
-import { applyRefineBrush, renderCutout } from './cutoutEffects'
+import { applyContentAwareErase, applyRefineBrush, renderCutout } from './cutoutEffects'
 
 const image = (width: number, height: number, pixels: number[]): PixelImage => ({
   width,
@@ -18,6 +18,40 @@ describe('applyRefineBrush', () => {
 
     const restored = applyRefineBrush(erased, original, { x: 1, y: 0, size: 1, hardness: 100, mode: 'restore' })
     expect([...restored.data.slice(4, 8)]).toEqual([0, 255, 0, 255])
+  })
+})
+
+describe('applyContentAwareErase', () => {
+  it('replaces a painted object with the surrounding background instead of transparency', () => {
+    const pixels: number[] = []
+    for (let y = 0; y < 7; y += 1) for (let x = 0; x < 7; x += 1) {
+      const objectPixel = x >= 2 && x <= 4 && y >= 2 && y <= 4
+      pixels.push(...(objectPixel ? [255, 64, 64, 255] : [12, 14, 18, 255]))
+    }
+
+    const repaired = applyContentAwareErase(image(7, 7, pixels), {
+      points: [{ x: 3, y: 3 }],
+      size: 5,
+      hardness: 100,
+    })
+
+    expect([...repaired.data.slice((3 * 7 + 3) * 4, (3 * 7 + 3) * 4 + 4)]).toEqual([12, 14, 18, 255])
+  })
+
+  it('preserves an opaque softly blended edge around the repaired area', () => {
+    const pixels = Array.from({ length: 9 * 9 }, (_, index) => {
+      const x = index % 9
+      return [x * 10, x * 10, x * 10, 255]
+    }).flat()
+
+    const repaired = applyContentAwareErase(image(9, 9, pixels), {
+      points: [{ x: 4, y: 4 }],
+      size: 5,
+      hardness: 50,
+    })
+
+    expect(repaired.data[(4 * 9 + 4) * 4 + 3]).toBe(255)
+    expect(repaired.data[(4 * 9 + 2) * 4]).toBeCloseTo(20, 0)
   })
 })
 

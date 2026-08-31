@@ -2,6 +2,12 @@ import type { PixelImage } from './imageProcessor'
 
 export type RefineBrushMode = 'erase' | 'restore'
 
+export interface ContentAwareEraseStroke {
+  points: Array<{ x: number; y: number }>
+  size: number
+  hardness: number
+}
+
 export type CutoutBackground =
   | { type: 'transparent' }
   | { type: 'color'; color: string }
@@ -26,6 +32,122 @@ const parseHex = (value: string): [number, number, number] => {
   return Number.isFinite(parsed) && normalized.length === 6
     ? [(parsed >> 16) & 255, (parsed >> 8) & 255, parsed & 255]
     : [0, 0, 0]
+}
+
+export const applyContentAwareErase = (
+  source: PixelImage,
+  stroke: ContentAwareEraseStroke,
+): PixelImage => {
+  const result = cloneImage(source)
+  if (!stroke.points.length || !source.width || !source.height) return result
+
+  const radius = Math.max(.5, stroke.size / 2)
+  const hardness = Math.max(0, Math.min(1, stroke.hardness / 100))
+  const hardRadius = radius * hardness
+  const strengths = new Float32Array(source.width * source.height)
+  let maskLeft = source.width - 1
+  let maskRight = 0
+  let maskTop = source.height - 1
+  let maskBottom = 0
+  const stamp = (centerX: number, centerY: number): void => {
+    const left = Math.max(0, Math.floor(centerX - radius))
+    const right = Math.min(source.width - 1, Math.ceil(centerX + radius))
+    const top = Math.max(0, Math.floor(centerY - radius))
+    const bottom = Math.min(source.height - 1, Math.ceil(centerY + radius))
+    for (let y = top; y <= bottom; y += 1) for (let x = left; x <= right; x += 1) {
+      const distance = Math.hypot(x - centerX, y - centerY)
+      if (distance > radius) continue
+      const strength = distance <= hardRadius || hardRadius === radius
+        ? 1
+        : 1 - (distance - hardRadius) / (radius - hardRadius)
+      const index = y * source.width + x
+      strengths[index] = Math.max(strengths[index] ?? 0, strength)
+      maskLeft = Math.min(maskLeft, x)
+      maskRight = Math.max(maskRight, x)
+      maskTop = Math.min(maskTop, y)
+      maskBottom = Math.max(maskBottom, y)
+    }
+  }
+
+  stroke.points.forEach((point, pointIndex) => {
+    const previous = stroke.points[pointIndex - 1]
+    if (!previous) return stamp(point.x, point.y)
+    const distance = Math.hypot(point.x - previous.x, point.y - previous.y)
+    const steps = Math.max(1, Math.ceil(distance / Math.max(1, radius / 2)))
+    for (let step = 1; step <= steps; step += 1) {
+      const progress = step / steps
+      stamp(previous.x + (point.x - previous.x) * progress, previous.y + (point.y - previous.y) * progress)
+    }
+  })
+
+  const filled = new Uint8Array(strengths.length)
+  let remaining = 0
+  filled.fill(1)
+  for (let y = maskTop; y <= maskBottom; y += 1) for (let x = maskLeft; x <= maskRight; x += 1) {
+    const index = y * source.width + x
+    if ((strengths[index] ?? 0) > 0) { filled[index] = 0; remaining += 1 }
+  }
+
+  const repaired = new Uint8ClampedArray(source.data)
+  while (remaining > 0) {
+    const next: Array<{ index: number; channels: [number, number, number, number] }> = []
+    for (let y = maskTop; y <= maskBottom; y += 1) for (let x = maskLeft; x <= maskRight; x += 1) {
+      const index = y * source.width + x
+      if (filled[index]) continue
+      const totals = [0, 0, 0, 0]
+      let count = 0
+      for (let offsetY = -1; offsetY <= 1; offsetY += 1) for (let offsetX = -1; offsetX <= 1; offsetX += 1) {
+        if ((!offsetX && !offsetY) || x + offsetX < 0 || x + offsetX >= source.width || y + offsetY < 0 || y + offsetY >= source.height) continue
+        const neighbor = (y + offsetY) * source.width + x + offsetX
+        if (!filled[neighbor]) continue
+        const dataOffset = neighbor * 4
+        for (let channel = 0; channel < 4; channel += 1) totals[channel] = (totals[channel] ?? 0) + (repaired[dataOffset + channel] ?? 0)
+        count += 1
+      }
+      if (count) next.push({ index, channels: totals.map(value => Math.round(value / count)) as [number, number, number, number] })
+    }
+    if (!next.length) break
+    next.forEach(({ index, channels }) => {
+      repaired.set(channels, index * 4)
+      filled[index] = 1
+      remaining -= 1
+    })
+  }
+
+  let relaxed = Float32Array.from(repaired)
+  const relaxationPasses = Math.min(80, Math.max(12, Math.ceil(radius * 2)))
+  for (let pass = 0; pass < relaxationPasses; pass += 1) {
+    const next = new Float32Array(relaxed)
+    for (let y = maskTop; y <= maskBottom; y += 1) for (let x = maskLeft; x <= maskRight; x += 1) {
+      const index = y * source.width + x
+      if (!(strengths[index] ?? 0)) continue
+      const neighbors = [
+        x > 0 ? index - 1 : -1,
+        x + 1 < source.width ? index + 1 : -1,
+        y > 0 ? index - source.width : -1,
+        y + 1 < source.height ? index + source.width : -1,
+      ].filter(neighbor => neighbor >= 0)
+      for (let channel = 0; channel < 4; channel += 1) {
+        next[index * 4 + channel] = neighbors.reduce(
+          (total, neighbor) => total + (relaxed[neighbor * 4 + channel] ?? 0),
+          0,
+        ) / neighbors.length
+      }
+    }
+    relaxed = next
+  }
+
+  for (let y = maskTop; y <= maskBottom; y += 1) for (let x = maskLeft; x <= maskRight; x += 1) {
+    const index = y * source.width + x
+    const strength = strengths[index] ?? 0
+    if (!strength) continue
+    const offset = index * 4
+    for (let channel = 0; channel < 4; channel += 1) {
+      const current = source.data[offset + channel] ?? 0
+      result.data[offset + channel] = Math.round(current + ((relaxed[offset + channel] ?? current) - current) * strength)
+    }
+  }
+  return result
 }
 
 export const applyRefineBrush = (

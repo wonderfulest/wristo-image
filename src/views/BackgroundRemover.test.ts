@@ -83,11 +83,15 @@ describe('ImageEditor', () => {
     expect(rail.text()).toContain('上传')
     expect(rail.text()).toContain('导出')
     expect(wrapper.get('[data-testid="category-tool-list"]').text()).toContain('快速抠图')
-    expect(wrapper.get('[data-testid="category-tool-list"]').text()).toContain('精修')
+    expect(wrapper.get('[data-testid="category-tool-list"]').text()).toContain('智能擦除')
+    expect(wrapper.get('[data-testid="category-tool-list"]').text()).toContain('背景填色')
+    expect(wrapper.get('[data-testid="category-tool-list"]').text()).toContain('恢复')
     expect(wrapper.get('[data-testid="category-tool-list"]').text()).toContain('背景替换')
     expect(wrapper.get('[data-testid="category-tool-list"]').text()).toContain('描边')
-    expect(wrapper.get('[data-tool-id="refine"]').attributes('disabled')).toBeDefined()
-    expect(wrapper.get('[data-tool-id="refine"]').attributes('title')).toBe('请先上传图片')
+    expect(wrapper.get('[data-tool-id="smart-erase"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-tool-id="background-fill"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-tool-id="restore"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-tool-id="smart-erase"]').attributes('title')).toBe('请先上传图片')
 
     await wrapper.get('[data-category-id="adjust"]').trigger('click')
 
@@ -114,10 +118,32 @@ describe('ImageEditor', () => {
       configurable: true,
     })
     await input.trigger('change')
-    await vi.waitFor(() => expect(wrapper.get('[data-tool-id="refine"]').attributes('disabled')).toBeUndefined())
+    await vi.waitFor(() => expect(wrapper.get('[data-tool-id="smart-erase"]').attributes('disabled')).toBeUndefined())
 
-    await wrapper.get('[data-tool-id="refine"]').trigger('click')
+    await wrapper.get('[data-tool-id="background-fill"]').trigger('click')
+    expect(wrapper.get('[data-testid="background-fill-color"]').attributes('type')).toBe('color')
+    expect((wrapper.get('[data-testid="background-fill-color"]').element as HTMLInputElement).value).toBe('#ffffff')
+    expect(wrapper.find('[data-testid="background-fill-tolerance"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('在画布上框选要填色的背景区域')
+
+    await wrapper.get('[data-tool-id="smart-erase"]').trigger('click')
     expect(wrapper.get('[data-testid="tool-preview-actions"]').text()).toContain('应用到画布')
+    expect(wrapper.find('.brush-modes').exists()).toBe(false)
+    expect(wrapper.get('.effect-panel').text()).toContain('智能擦除会在松开画笔后用周围背景补齐')
+    const stage = wrapper.get('.workspace-stage')
+    const previewCanvas = wrapper.get('canvas.result-canvas')
+    ;(previewCanvas.element as HTMLCanvasElement).width = 400
+    vi.spyOn(stage.element, 'getBoundingClientRect').mockReturnValue({ left: 20, top: 30 } as DOMRect)
+    vi.spyOn(previewCanvas.element, 'getBoundingClientRect').mockReturnValue({ left: 100, top: 80, width: 200, height: 200 } as DOMRect)
+    previewCanvas.element.dispatchEvent(new MouseEvent('pointerenter', { clientX: 150, clientY: 130 }))
+    await wrapper.vm.$nextTick()
+    expect(wrapper.get('[data-testid="brush-cursor"]').attributes('style')).toContain('width: 16px')
+    await previewCanvas.trigger('pointerleave')
+    expect(wrapper.find('[data-testid="brush-cursor"]').exists()).toBe(false)
+
+    await wrapper.get('[data-tool-id="restore"]').trigger('click')
+    expect(wrapper.find('.brush-modes').exists()).toBe(false)
+    expect(wrapper.get('.effect-panel').text()).toContain('恢复会从原图重新显露对应区域')
 
     await wrapper.get('[data-tool-id="background"]').trigger('click')
     expect(wrapper.get('[role="status"]').text()).toBe('未应用的修改已取消')

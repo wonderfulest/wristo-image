@@ -1,5 +1,5 @@
 export type EditorCategoryId = 'cutout' | 'adjust'
-export type EditorToolId = 'background-remover' | 'refine' | 'background' | 'outline' | 'crop' | 'resize' | 'rotate-flip'
+export type EditorToolId = 'background-remover' | 'smart-erase' | 'background-fill' | 'restore' | 'background' | 'outline' | 'crop' | 'resize' | 'rotate-flip'
 
 export interface EditorCategoryDefinition {
   id: EditorCategoryId
@@ -22,7 +22,9 @@ export const editorCategories: readonly EditorCategoryDefinition[] = [
 
 export const editorTools: readonly EditorToolDefinition[] = [
   { id: 'background-remover', categoryId: 'cutout', title: '快速抠图', description: '框选图片中的图标，清除与选区边缘连通的近似背景色。', icon: '✦' },
-  { id: 'refine', categoryId: 'cutout', title: '精修', description: '使用擦除和恢复画笔直接编辑当前画布。', icon: '◌' },
+  { id: 'smart-erase', categoryId: 'cutout', title: '智能擦除', description: '涂抹不需要的区域，并用周围背景智能补齐。', icon: '◌' },
+  { id: 'background-fill', categoryId: 'cutout', title: '背景填色', description: '框选矩形区域，将区域内全部像素填充为指定颜色。', icon: '▣' },
+  { id: 'restore', categoryId: 'cutout', title: '恢复', description: '用画笔从原图重新显露被移除的区域。', icon: '↺' },
   { id: 'background', categoryId: 'cutout', title: '背景替换', description: '为当前画布设置纯色、渐变或自定义图片背景。', icon: '▧' },
   { id: 'outline', categoryId: 'cutout', title: '描边', description: '为当前画布中的透明主体增加可调外描边。', icon: '◎' },
   { id: 'crop', categoryId: 'adjust', title: '裁剪', description: '自由裁剪，或使用常用固定比例。', icon: '⌗' },

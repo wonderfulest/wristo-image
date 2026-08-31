@@ -9,7 +9,7 @@
         v-if="images.length"
         data-testid="clear-image-history"
         type="button"
-        @click="emit('clear')"
+        @click="requestClear"
       >清空</button>
     </header>
 
@@ -38,7 +38,7 @@
           class="delete-history-image"
           type="button"
           :aria-label="`删除 ${image.name}`"
-          @click.stop="emit('delete', image.id)"
+          @click.stop="requestDelete(image)"
         >×</button>
       </article>
     </div>
@@ -50,10 +50,22 @@
     </div>
 
     <footer>最多保留最近 20 张</footer>
+
+    <AppConfirmDialog
+      :open="Boolean(pendingAction)"
+      :title="confirmationTitle"
+      :description="confirmationDescription"
+      :confirm-label="confirmationButtonLabel"
+      @cancel="closeConfirmation"
+      @confirm="confirmAction"
+    />
   </aside>
 </template>
 
 <script setup lang="ts">
+import { computed, ref } from 'vue'
+import AppConfirmDialog from '@/components/ui/AppConfirmDialog.vue'
+
 export type ImageHistoryPanelItem = {
   id: string
   name: string
@@ -63,12 +75,48 @@ export type ImageHistoryPanelItem = {
   previewUrl: string
 }
 
-defineProps<{ images: ImageHistoryPanelItem[] }>()
 const emit = defineEmits<{
   select: [id: string]
   delete: [id: string]
   clear: []
 }>()
+
+type PendingAction =
+  | { type: 'delete'; image: ImageHistoryPanelItem }
+  | { type: 'clear' }
+
+const props = defineProps<{ images: ImageHistoryPanelItem[] }>()
+const pendingAction = ref<PendingAction | null>(null)
+
+const confirmationTitle = computed(() =>
+  pendingAction.value?.type === 'clear' ? '清空全部历史图片？' : '删除这张历史图片？',
+)
+const confirmationDescription = computed(() => {
+  if (pendingAction.value?.type === 'delete') {
+    return `“${pendingAction.value.image.name}”将从当前浏览器中删除，此操作无法撤销。`
+  }
+  return `共 ${props.images.length} 张历史图片将从当前浏览器中删除，此操作无法撤销。`
+})
+const confirmationButtonLabel = computed(() =>
+  pendingAction.value?.type === 'clear' ? '清空全部' : '删除',
+)
+
+const requestDelete = (image: ImageHistoryPanelItem): void => {
+  pendingAction.value = { type: 'delete', image }
+}
+const requestClear = (): void => {
+  pendingAction.value = { type: 'clear' }
+}
+const closeConfirmation = (): void => {
+  pendingAction.value = null
+}
+const confirmAction = (): void => {
+  const action = pendingAction.value
+  if (!action) return
+  if (action.type === 'delete') emit('delete', action.image.id)
+  else emit('clear')
+  closeConfirmation()
+}
 </script>
 
 <style scoped>

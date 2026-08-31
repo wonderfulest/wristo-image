@@ -153,6 +153,40 @@ export const removeConnectedBackground = (
   return result
 }
 
+const parseHexColor = (color: string): readonly [number, number, number] => {
+  const hex = color.replace('#', '')
+  const normalized = hex.length === 3
+    ? [...hex].map(character => character + character).join('')
+    : hex
+  const parsed = Number.parseInt(normalized, 16)
+  if (!Number.isFinite(parsed) || normalized.length !== 6) throw new RangeError('Fill color must be a hex color')
+  return [(parsed >> 16) & 255, (parsed >> 8) & 255, parsed & 255]
+}
+
+export const fillSelectionWithColor = (
+  source: PixelImage,
+  selection: SelectionRect,
+  color: string,
+): PixelImage => {
+  const normalized = normalizeSelection(selection, source.width, source.height)
+  if (!normalized) throw new RangeError('Selection must contain at least one pixel')
+  const result: PixelImage = {
+    width: source.width,
+    height: source.height,
+    data: new Uint8ClampedArray(source.data),
+  }
+  const [red, green, blue] = parseHexColor(color)
+
+  for (let y = 0; y < normalized.height; y += 1) {
+    for (let x = 0; x < normalized.width; x += 1) {
+      const targetOffset = ((normalized.y + y) * source.width + normalized.x + x) * 4
+      result.data.set([red, green, blue, 255], targetOffset)
+    }
+  }
+
+  return result
+}
+
 export const trimTransparentBounds = (source: PixelImage): PixelImage | null => {
   assertPixelImage(source)
   let left = source.width
