@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  applyCutoutOutputOptions,
   normalizeSelection,
   removeConnectedBackground,
   trimTransparentBounds,
@@ -100,5 +101,42 @@ describe('trimTransparentBounds', () => {
     const source = pixelImage([[[0, 0, 0, 0]]])
 
     expect(trimTransparentBounds(source)).toBeNull()
+  })
+})
+
+describe('applyCutoutOutputOptions', () => {
+  it('trims transparent padding and centers the subject on a square canvas', () => {
+    const clear = [0, 0, 0, 0] as const
+    const red = [220, 30, 40, 255] as const
+    const source = pixelImage([
+      [clear, clear, clear, clear],
+      [clear, red, red, clear],
+      [clear, clear, clear, clear],
+    ].map(row => row.map(pixel => [...pixel] as [number, number, number, number])))
+
+    const result = applyCutoutOutputOptions(source, { trimWhitespace: true, aspectRatio: 1 })
+
+    expect(result).toMatchObject({ width: 2, height: 2 })
+    expect(alphaAt(result, 0, 0)).toBe(255)
+    expect(alphaAt(result, 1, 0)).toBe(255)
+    expect(alphaAt(result, 0, 1)).toBe(0)
+  })
+
+  it('pads the shorter dimension without stretching visible pixels', () => {
+    const red = [220, 30, 40, 255] as const
+    const source = pixelImage([[red], [red], [red]].map(row => row.map(pixel => [...pixel] as [number, number, number, number])))
+
+    const result = applyCutoutOutputOptions(source, { trimWhitespace: false, aspectRatio: 1 })
+
+    expect(result).toMatchObject({ width: 3, height: 3 })
+    expect([alphaAt(result, 0, 1), alphaAt(result, 1, 1), alphaAt(result, 2, 1)]).toEqual([0, 255, 0])
+  })
+
+  it('keeps the current canvas when the ratio is free', () => {
+    const source = pixelImage([[[10, 20, 30, 255], [40, 50, 60, 255]]])
+
+    const result = applyCutoutOutputOptions(source, { trimWhitespace: false, aspectRatio: null })
+
+    expect(result).toBe(source)
   })
 })

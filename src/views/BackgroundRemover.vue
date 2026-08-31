@@ -95,12 +95,12 @@
             type="button"
             :class="{ active: activeTool.id === tool.id }"
             :data-tool-id="tool.id"
-            :disabled="tool.requiresCutout && !previewImage"
-            :title="tool.requiresCutout && !previewImage ? '请先完成快速抠图' : tool.description"
+            :disabled="!sourceImage"
+            :title="!sourceImage ? '请先上传图片' : tool.description"
             @click="selectTool(tool.id)"
           >
             <span>{{ tool.icon }}</span>
-            <span class="tool-copy"><b>{{ tool.title }}</b><small>{{ tool.requiresCutout && !previewImage ? '请先完成快速抠图' : tool.description }}</small></span>
+            <span class="tool-copy"><b>{{ tool.title }}</b><small>{{ !sourceImage ? '请先上传图片' : tool.description }}</small></span>
             <i>›</i>
           </button>
         </div>
@@ -124,6 +124,29 @@
           </div>
           <button type="button" @click="fileInput?.click()">更换</button>
         </div>
+
+        <section
+          v-if="activeTool.id === 'background-remover'"
+          class="panel-section output-settings"
+        >
+          <div class="section-title"><span>输出设置</span></div>
+          <label>
+            输出比例
+            <select data-testid="cutout-ratio" v-model.number="outputAspectRatio">
+              <option :value="null">自由</option>
+              <option :value="1">1:1</option>
+              <option :value="4 / 3">4:3</option>
+              <option :value="3 / 4">3:4</option>
+              <option :value="16 / 9">16:9</option>
+              <option :value="9 / 16">9:16</option>
+            </select>
+          </label>
+          <label class="checkbox-setting">
+            <input data-testid="trim-whitespace" v-model="trimWhitespace" type="checkbox" />
+            去掉透明空白
+          </label>
+          <p>保持图标原比例，居中补透明区域。</p>
+        </section>
 
         <section
           v-if="activeTool.id === 'background-remover'"
@@ -254,7 +277,7 @@
         >
           <span>透明结果已生成</span
           ><strong
-            >{{ previewImage.width }} × {{ previewImage.height }} px</strong
+            >{{ renderedPreview?.width }} × {{ renderedPreview?.height }} px</strong
           >
         </div>
         <section
@@ -297,7 +320,7 @@
               />
               <output>{{ brushHardness }}%</output></label
             >
-            <p>直接在画布主体上拖动精修，操作可撤销。</p>
+            <p>直接在当前画布上拖动精修；应用后才会写入画布。</p>
           </div>
 
           <div v-else-if="activeTool.id === 'background'" class="effect-panel">
@@ -356,9 +379,18 @@
             <p>描边位于主体下方，不会修改透明主体。</p>
           </div>
         </section>
+        <div
+          v-if="previewImage"
+          class="tool-preview-actions"
+          data-testid="tool-preview-actions"
+        >
+          <button type="button" class="preview-cancel" @click="cancelToolPreview()">取消</button>
+          <button type="button" class="primary-operation" @click="applyToolPreview">应用到画布</button>
+        </div>
         <p v-if="errorMessage" role="alert" class="editor-error">
           {{ errorMessage }}
         </p>
+        <p v-if="toolNotice" role="status" class="tool-notice">{{ toolNotice }}</p>
         <button
           v-if="previewImage && activeTool.id === 'background-remover'"
           class="reselect-button"
@@ -380,7 +412,7 @@
           <i />
           <span
             ><strong>图片仅在当前浏览器中处理</strong
-            ><br />不会上传服务器，刷新后自动清空。</span
+            ><br />不会上传服务器，历史仅保存在本机浏览器。</span
           >
         </div>
       </aside>
@@ -478,6 +510,12 @@
           ><span>滚轮缩放 · 中键拖动画布</span>
         </footer>
       </section>
+      <ImageHistoryPanel
+        :images="localHistoryImages"
+        @select="loadHistoryImage"
+        @delete="deleteHistoryImage"
+        @clear="clearImageHistory"
+      />
     </div>
 
     <div
@@ -550,7 +588,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import {
   editorCategories,
   getCategoryTools,
@@ -559,6 +597,16 @@ import {
   type EditorToolDefinition,
 } from "@/features/editor/toolRegistry";
 import { ImageHistory } from "@/features/editor/imageHistory";
+import { CanvasToolSession } from "@/features/editor/canvasToolSession";
+import {
+  createLocalImageHistoryRepository,
+  type LocalImageHistoryEntry,
+} from "@/features/editor/localImageHistory";
+import {
+  hasTransparentPixels,
+  resolveCurrentImageExportSettings,
+  type ImageExportFormat,
+} from "@/features/editor/exportSettings";
 import {
   cropImage,
   flipImage,
@@ -577,26 +625,39 @@ import {
   validateImageFile,
 } from "@/features/background-remover/fileValidation";
 import {
+  loadCutoutPreferences,
+  saveCutoutPreferences,
+} from "@/features/background-remover/cutoutPreferences";
+import {
+  applyCutoutOutputOptions,
   normalizeSelection,
   removeConnectedBackground,
   trimTransparentBounds,
   type PixelImage,
   type SelectionRect,
 } from "@/features/background-remover/imageProcessor";
+import ImageHistoryPanel, {
+  type ImageHistoryPanelItem,
+} from "@/components/editor/ImageHistoryPanel.vue";
 
+const savedCutoutPreferences = loadCutoutPreferences(window.localStorage);
+const localImageHistoryRepository = createLocalImageHistoryRepository();
 const fileInput = ref<HTMLInputElement | null>(null);
 const backgroundInput = ref<HTMLInputElement | null>(null);
 const editorCanvas = ref<HTMLCanvasElement | null>(null);
 const previewCanvas = ref<HTMLCanvasElement | null>(null);
 const sourceImage = ref<PixelImage | null>(null);
 const previewImage = ref<PixelImage | null>(null);
-const restoreImage = ref<PixelImage | null>(null);
-const cutoutHistory = ref<ImageHistory | null>(null);
+const toolSession = ref<CanvasToolSession | null>(null);
 const selection = ref<SelectionRect | null>(null);
 const selectionStart = ref<{ x: number; y: number } | null>(null);
 const fileName = ref("");
+const sourceMimeType = ref("");
 const errorMessage = ref("");
-const tolerance = ref(28);
+const toolNotice = ref("");
+const tolerance = ref(savedCutoutPreferences.tolerance);
+const outputAspectRatio = ref<number | null>(savedCutoutPreferences.aspectRatio);
+const trimWhitespace = ref(savedCutoutPreferences.trimWhitespace);
 const activeTool = ref(resolveEditorTool("background-remover"));
 const activeCategory = ref<EditorCategoryId>("cutout");
 const history = ref<ImageHistory | null>(null);
@@ -616,10 +677,12 @@ const resizeWidth = ref(1);
 const resizeHeight = ref(1);
 const lockRatio = ref(true);
 const exportOpen = ref(false);
-const exportFormat = ref<"png" | "jpeg" | "webp">("png");
+const exportFormat = ref<ImageExportFormat>("png");
 const exportQuality = ref(90);
 const exportWidth = ref(1);
 const exportHeight = ref(1);
+const localHistoryEntries = ref<LocalImageHistoryEntry[]>([]);
+const localHistoryImages = ref<ImageHistoryPanelItem[]>([]);
 const brushMode = ref<RefineBrushMode>("erase");
 const brushSize = ref(32);
 const brushHardness = ref(85);
@@ -648,15 +711,11 @@ const cropRatios = [
 ];
 const canUndo = computed(() => {
   historyRevision.value;
-  return previewImage.value
-    ? (cutoutHistory.value?.canUndo ?? false)
-    : (history.value?.canUndo ?? false);
+  return !previewImage.value && (history.value?.canUndo ?? false);
 });
 const canRedo = computed(() => {
   historyRevision.value;
-  return previewImage.value
-    ? (cutoutHistory.value?.canRedo ?? false)
-    : (history.value?.canRedo ?? false);
+  return !previewImage.value && (history.value?.canRedo ?? false);
 });
 const activeCategoryDefinition = computed(() => editorCategories.find(category => category.id === activeCategory.value) ?? editorCategories[0]!);
 const categoryTools = computed(() => getCategoryTools(activeCategory.value));
@@ -665,7 +724,7 @@ const canvasTransform = computed(() => ({
 }));
 const workspaceMessage = computed(() =>
   previewImage.value
-    ? "透明结果预览"
+    ? `${activeTool.value.title}预览（尚未应用）`
     : !sourceImage.value
       ? "画布"
       : activeTool.value.id === "crop"
@@ -687,14 +746,30 @@ const cutoutBackground = computed<CutoutBackground>(() => {
     };
   return { type: "transparent" };
 });
-const renderedPreview = computed(() =>
-  previewImage.value
-    ? renderCutout(previewImage.value, {
-        background: cutoutBackground.value,
-        outline: { width: outlineWidth.value, color: outlineColor.value },
+const renderedPreview = computed(() => {
+  if (!previewImage.value) return null;
+  const subject = activeTool.value.id === "background-remover"
+    ? applyCutoutOutputOptions(previewImage.value, {
+        aspectRatio: outputAspectRatio.value,
+        trimWhitespace: trimWhitespace.value,
       })
-    : null,
-);
+    : previewImage.value;
+  return renderCutout(subject, {
+    background: activeTool.value.id === "background" ? cutoutBackground.value : { type: "transparent" },
+    outline: activeTool.value.id === "outline"
+      ? { width: outlineWidth.value, color: outlineColor.value }
+      : { width: 0, color: outlineColor.value },
+  });
+});
+
+watch([outputAspectRatio, trimWhitespace, tolerance], () => {
+  saveCutoutPreferences(window.localStorage, {
+    aspectRatio: outputAspectRatio.value,
+    trimWhitespace: trimWhitespace.value,
+    tolerance: tolerance.value,
+  });
+  if (previewImage.value) void showPreview();
+});
 
 const pixelImageFromBitmap = (bitmap: ImageBitmap): PixelImage => {
   const canvas = document.createElement("canvas");
@@ -747,6 +822,33 @@ const drawEditor = (): void => {
   context.restore();
 };
 
+const revokeHistoryPreviewUrls = (): void => {
+  localHistoryImages.value.forEach((image) => URL.revokeObjectURL(image.previewUrl));
+};
+
+const refreshLocalImageHistory = async (): Promise<void> => {
+  if (!localImageHistoryRepository) return;
+  const entries = await localImageHistoryRepository.list();
+  revokeHistoryPreviewUrls();
+  localHistoryEntries.value = entries;
+  localHistoryImages.value = entries.map((entry) => ({
+    id: entry.id,
+    name: entry.name,
+    width: entry.width,
+    height: entry.height,
+    createdAt: entry.createdAt,
+    previewUrl: URL.createObjectURL(entry.blob),
+  }));
+};
+
+onMounted(() => {
+  void refreshLocalImageHistory().catch((error) => {
+    console.warn("无法读取本地图片历史：", error);
+  });
+});
+
+onBeforeUnmount(revokeHistoryPreviewUrls);
+
 const showPreview = async (): Promise<void> => {
   await nextTick();
   if (previewCanvas.value && renderedPreview.value)
@@ -785,15 +887,31 @@ const loadFile = async (file: File): Promise<void> => {
     historyRevision.value += 1;
     bitmap.close();
     fileName.value = file.name;
+    sourceMimeType.value = file.type;
     selection.value = null;
     previewImage.value = null;
-    restoreImage.value = null;
-    cutoutHistory.value = null;
-    tolerance.value = 28;
+    toolSession.value = null;
     resizeWidth.value = sourceImage.value.width;
     resizeHeight.value = sourceImage.value.height;
     exportWidth.value = sourceImage.value.width;
     exportHeight.value = sourceImage.value.height;
+    if (localImageHistoryRepository) {
+      try {
+        const createdAt = Date.now();
+        await localImageHistoryRepository.save({
+          id: `${createdAt}-${crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)}`,
+          name: file.name,
+          mimeType: file.type,
+          width: sourceImage.value.width,
+          height: sourceImage.value.height,
+          createdAt,
+          blob: file,
+        });
+        await refreshLocalImageHistory();
+      } catch (error) {
+        console.warn("无法保存本地图片历史：", error);
+      }
+    }
     await nextTick();
     drawEditor();
   } catch {
@@ -824,6 +942,44 @@ const onDrop = (event: DragEvent): void => {
 const onPaste = (event: ClipboardEvent): void => {
   const file = [...(event.clipboardData?.files ?? [])][0];
   if (file) void loadFile(file);
+};
+
+const loadHistoryImage = async (id: string): Promise<void> => {
+  const entry = localHistoryEntries.value.find((image) => image.id === id);
+  if (!entry) return;
+  try {
+    const bitmap = await createImageBitmap(entry.blob);
+    sourceImage.value = pixelImageFromBitmap(bitmap);
+    bitmap.close();
+    history.value = new ImageHistory(sourceImage.value);
+    historyRevision.value += 1;
+    fileName.value = entry.name;
+    sourceMimeType.value = entry.mimeType;
+    selection.value = null;
+    previewImage.value = null;
+    toolSession.value = null;
+    resizeWidth.value = entry.width;
+    resizeHeight.value = entry.height;
+    exportWidth.value = entry.width;
+    exportHeight.value = entry.height;
+    errorMessage.value = "";
+    await nextTick();
+    drawEditor();
+  } catch {
+    errorMessage.value = "无法读取这张历史图片，可能已被浏览器清理。";
+  }
+};
+
+const deleteHistoryImage = async (id: string): Promise<void> => {
+  if (!localImageHistoryRepository) return;
+  await localImageHistoryRepository.delete(id);
+  await refreshLocalImageHistory();
+};
+
+const clearImageHistory = async (): Promise<void> => {
+  if (!localImageHistoryRepository) return;
+  await localImageHistoryRepository.clear();
+  await refreshLocalImageHistory();
 };
 
 const pointInImage = (event: PointerEvent): { x: number; y: number } | null => {
@@ -910,12 +1066,10 @@ const processSelection = (): void => {
     sourceImage.value.height,
   );
   const hasSubject = trimTransparentBounds(processed) !== null;
-  previewImage.value = hasSubject ? processed : null;
-  restoreImage.value = hasSubject && normalized
-    ? cropImage(sourceImage.value, normalized)
+  toolSession.value = hasSubject && normalized
+    ? new CanvasToolSession(cropImage(sourceImage.value, normalized))
     : null;
-  cutoutHistory.value = hasSubject ? new ImageHistory(processed) : null;
-  historyRevision.value += 1;
+  previewImage.value = hasSubject ? toolSession.value?.preview(processed) ?? null : null;
   errorMessage.value = previewImage.value
     ? ""
     : "没有识别到可保留的主体，请降低容差或重新框选。";
@@ -935,24 +1089,24 @@ const pointInPreviewSubject = (
   const renderedY =
     ((event.clientY - bounds.top) * canvas.height) / bounds.height;
   return {
-    x: renderedX - outlineWidth.value,
-    y: renderedY - outlineWidth.value,
+    x: renderedX,
+    y: renderedY,
   };
 };
 const refineAt = (event: PointerEvent): void => {
-  if (!previewImage.value || !restoreImage.value) return;
+  if (!previewImage.value || !toolSession.value) return;
   const point = pointInPreviewSubject(event);
   if (!point) return;
-  previewImage.value = applyRefineBrush(
+  previewImage.value = toolSession.value.preview(applyRefineBrush(
     previewImage.value,
-    restoreImage.value,
+    toolSession.value.original,
     {
       ...point,
       size: brushSize.value,
       hardness: brushHardness.value,
       mode: brushMode.value,
     },
-  );
+  ));
   void showPreview();
 };
 const startRefine = (event: PointerEvent): void => {
@@ -967,39 +1121,51 @@ const moveRefine = (event: PointerEvent): void => {
 const finishRefine = (): void => {
   if (!isRefining.value || !previewImage.value) return;
   isRefining.value = false;
-  cutoutHistory.value?.commit(previewImage.value);
-  historyRevision.value += 1;
+};
+
+const cancelToolPreview = (showNotice = false): void => {
+  if (previewImage.value && showNotice) toolNotice.value = "未应用的修改已取消";
+  toolSession.value?.cancel();
+  toolSession.value = null;
+  previewImage.value = null;
+  selection.value = null;
+  void nextTick(drawEditor);
+};
+
+const applyToolPreview = (): void => {
+  const result = renderedPreview.value;
+  if (!result) return;
+  toolSession.value?.preview(result);
+  commitImage(toolSession.value?.apply() ?? result);
+  toolSession.value = null;
+  toolNotice.value = "修改已应用到当前画布";
 };
 
 const resetWorkspace = (): void => {
   tolerance.value = 28;
+  outputAspectRatio.value = null;
+  trimWhitespace.value = false;
   selection.value = null;
-  previewImage.value = null;
-  restoreImage.value = null;
-  cutoutHistory.value = null;
+  cancelToolPreview();
   errorMessage.value = "";
   drawEditor();
 };
 
 const reselect = (): void => {
-  previewImage.value = null;
-  restoreImage.value = null;
-  cutoutHistory.value = null;
+  cancelToolPreview();
   errorMessage.value = "";
-  void nextTick(drawEditor);
 };
 
 const selectTool = (toolId: EditorToolDefinition["id"]): void => {
   const tool = resolveEditorTool(toolId);
-  if (tool.requiresCutout && !previewImage.value) return;
-  const staysInCutoutResult = tool.categoryId === "cutout" && previewImage.value;
+  if (!sourceImage.value) return;
+  cancelToolPreview(true);
   activeTool.value = tool;
   activeCategory.value = tool.categoryId;
   if (tool.id === "refine") brushMode.value = "erase";
-  if (!staysInCutoutResult) {
-    previewImage.value = null;
-    restoreImage.value = null;
-    cutoutHistory.value = null;
+  if (["refine", "background", "outline"].includes(tool.id)) {
+    toolSession.value = new CanvasToolSession(sourceImage.value);
+    previewImage.value = toolSession.value.rendered;
   }
   selection.value = null;
   errorMessage.value = "";
@@ -1019,6 +1185,7 @@ const commitImage = (image: PixelImage): void => {
   historyRevision.value += 1;
   selection.value = null;
   previewImage.value = null;
+  toolSession.value = null;
   resizeWidth.value = image.width;
   resizeHeight.value = image.height;
   exportWidth.value = image.width;
@@ -1030,6 +1197,7 @@ const restoreHistory = (image: PixelImage): void => {
   sourceImage.value = image;
   selection.value = null;
   previewImage.value = null;
+  toolSession.value = null;
   resizeWidth.value = image.width;
   resizeHeight.value = image.height;
   exportWidth.value = image.width;
@@ -1038,21 +1206,9 @@ const restoreHistory = (image: PixelImage): void => {
   void nextTick(drawEditor);
 };
 const undo = (): void => {
-  if (previewImage.value && cutoutHistory.value?.canUndo) {
-    previewImage.value = cutoutHistory.value.undo();
-    historyRevision.value += 1;
-    void showPreview();
-    return;
-  }
   if (history.value?.canUndo) restoreHistory(history.value.undo());
 };
 const redo = (): void => {
-  if (previewImage.value && cutoutHistory.value?.canRedo) {
-    previewImage.value = cutoutHistory.value.redo();
-    historyRevision.value += 1;
-    void showPreview();
-    return;
-  }
   if (history.value?.canRedo) restoreHistory(history.value.redo());
 };
 const applyRotate = (direction: "clockwise" | "counter-clockwise"): void => {
@@ -1144,15 +1300,23 @@ const endPan = (): void => {
 };
 
 const openExport = (): void => {
-  const current = renderedPreview.value ?? sourceImage.value;
+  const current = sourceImage.value;
   if (!current) return;
-  exportWidth.value = current.width;
-  exportHeight.value = current.height;
+  const settings = resolveCurrentImageExportSettings({
+    width: current.width,
+    height: current.height,
+    mimeType: sourceMimeType.value,
+    fileName: fileName.value,
+    hasTransparentResult: hasTransparentPixels(current.data),
+  });
+  exportFormat.value = settings.format;
+  exportWidth.value = settings.width;
+  exportHeight.value = settings.height;
   exportOpen.value = true;
 };
 
 const downloadExport = (): void => {
-  const current = renderedPreview.value ?? sourceImage.value;
+  const current = sourceImage.value;
   if (!current) return;
   const output =
     current.width === exportWidth.value && current.height === exportHeight.value
@@ -1307,7 +1471,7 @@ const downloadExport = (): void => {
 .editor-body {
   min-height: 0;
   display: grid;
-  grid-template-columns: 76px 304px minmax(0, 1fr);
+  grid-template-columns: 76px 304px minmax(0, 1fr) 190px;
 }
 .tool-rail {
   background: #fff;
@@ -1520,6 +1684,24 @@ const downloadExport = (): void => {
   border-radius: 7px;
   font-size: 10px;
   line-height: 1.4;
+}
+.tool-notice {
+  margin: 9px 0 0;
+  color: #64707a;
+  font-size: 10px;
+}
+.tool-preview-actions {
+  display: grid;
+  grid-template-columns: 1fr 1.35fr;
+  gap: 8px;
+  margin-top: 12px;
+}
+.preview-cancel {
+  border: 1px solid #dfe3e7;
+  border-radius: 7px;
+  background: #fff;
+  color: #606a73;
+  cursor: pointer;
 }
 .reselect-button,
 .panel-reset {
@@ -1739,6 +1921,36 @@ const downloadExport = (): void => {
 .operation-panel {
   display: grid;
   gap: 10px;
+}
+.output-settings {
+  display: grid;
+  gap: 10px;
+}
+.output-settings label {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  color: #66707a;
+  font-size: 11px;
+}
+.output-settings select {
+  min-width: 0;
+  border: 1px solid #d9dde1;
+  border-radius: 6px;
+  padding: 8px;
+  background: #fff;
+  color: #394049;
+}
+.output-settings .checkbox-setting {
+  display: flex;
+  cursor: pointer;
+}
+.output-settings p {
+  margin: 0;
+  color: #9299a1;
+  font-size: 9px;
+  line-height: 1.45;
 }
 .operation-panel > p {
   margin: 0;
@@ -2031,7 +2243,7 @@ const downloadExport = (): void => {
 }
 @media (max-width: 850px) {
   .editor-body {
-    grid-template-columns: 64px 250px minmax(0, 1fr);
+    grid-template-columns: 64px 250px minmax(0, 1fr) 150px;
   }
   .tool-panel {
     padding: 17px 13px;
@@ -2051,6 +2263,9 @@ const downloadExport = (): void => {
   }
   .editor-body {
     grid-template-columns: 58px minmax(0, 1fr);
+  }
+  .image-history-panel {
+    display: none;
   }
   .tool-panel {
     position: absolute;

@@ -178,3 +178,34 @@ export const trimTransparentBounds = (source: PixelImage): PixelImage | null => 
     height: bottom - top + 1,
   })
 }
+
+export interface CutoutOutputOptions {
+  trimWhitespace: boolean
+  aspectRatio: number | null
+}
+
+export const applyCutoutOutputOptions = (
+  source: PixelImage,
+  options: CutoutOutputOptions,
+): PixelImage => {
+  assertPixelImage(source)
+  const trimmed = options.trimWhitespace ? trimTransparentBounds(source) : source
+  const base = trimmed ?? source
+  const ratio = options.aspectRatio
+  if (!ratio || !Number.isFinite(ratio) || ratio <= 0) return base
+
+  const currentRatio = base.width / base.height
+  if (Math.abs(currentRatio - ratio) < Number.EPSILON) return base
+  const width = currentRatio < ratio ? Math.ceil(base.height * ratio) : base.width
+  const height = currentRatio > ratio ? Math.ceil(base.width / ratio) : base.height
+  const data = new Uint8ClampedArray(width * height * 4)
+  const offsetX = Math.floor((width - base.width) / 2)
+  const offsetY = Math.floor((height - base.height) / 2)
+
+  for (let y = 0; y < base.height; y += 1) {
+    const sourceStart = y * base.width * 4
+    const targetStart = ((y + offsetY) * width + offsetX) * 4
+    data.set(base.data.subarray(sourceStart, sourceStart + base.width * 4), targetStart)
+  }
+  return { width, height, data }
+}

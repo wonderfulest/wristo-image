@@ -21,9 +21,8 @@ describe('editor tool registry', () => {
     expect(getCategoryTools('adjust').map(tool => tool.title)).toEqual(['裁剪', '调整尺寸', '旋转翻转'])
   })
 
-  it('marks cutout follow-up tools as requiring a cutout result', () => {
-    expect(resolveEditorTool('refine').requiresCutout).toBe(true)
-    expect(resolveEditorTool('background-remover').requiresCutout).toBe(false)
+  it('keeps every tool independent from other tool results', () => {
+    expect(editorTools.every(tool => !('requiresCutout' in tool))).toBe(true)
   })
 
   it('falls back to background removal when an unknown tool is requested', () => {
