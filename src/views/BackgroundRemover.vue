@@ -56,12 +56,23 @@
 
     <div class="editor-body">
       <nav data-testid="tool-rail" class="tool-rail" aria-label="编辑工具">
-        <button class="rail-item active" type="button">
-          <span class="rail-icon">{{ activeTool.icon }}</span
-          ><b>工具</b>
+        <button
+          v-for="category in editorCategories"
+          :key="category.id"
+          type="button"
+          class="rail-item"
+          :class="{ active: activeCategory === category.id }"
+          :data-category-id="category.id"
+          @click="selectCategory(category.id)"
+        >
+          <span class="rail-icon">{{ category.icon }}</span
+          ><b>{{ category.title }}</b>
         </button>
         <button class="rail-item" type="button" @click="fileInput?.click()">
           <span class="rail-icon">↥</span><b>上传</b>
+        </button>
+        <button class="rail-item" type="button" :disabled="!sourceImage" @click="openExport">
+          <span class="rail-icon">↓</span><b>导出</b>
         </button>
         <div class="rail-spacer" />
         <span class="privacy-dot" title="图片不会上传服务器" />
@@ -70,23 +81,27 @@
       <aside data-testid="tool-panel" class="tool-panel">
         <div class="tool-panel-heading">
           <div>
-            <span>图片工具</span>
+            <span>{{ activeCategoryDefinition.title }}工具</span>
             <h1>{{ activeTool.title }}</h1>
           </div>
           <span class="active-badge">已启用</span>
         </div>
         <p class="panel-intro">{{ activeTool.description }}</p>
 
-        <div class="tool-grid">
+        <div data-testid="category-tool-list" class="category-tool-list">
           <button
-            v-for="tool in editorTools"
+            v-for="tool in categoryTools"
             :key="tool.id"
             type="button"
             :class="{ active: activeTool.id === tool.id }"
+            :data-tool-id="tool.id"
+            :disabled="tool.requiresCutout && !previewImage"
+            :title="tool.requiresCutout && !previewImage ? '请先完成快速抠图' : tool.description"
             @click="selectTool(tool.id)"
           >
-            <span>{{ tool.icon }}</span
-            ><b>{{ tool.title }}</b>
+            <span>{{ tool.icon }}</span>
+            <span class="tool-copy"><b>{{ tool.title }}</b><small>{{ tool.requiresCutout && !previewImage ? '请先完成快速抠图' : tool.description }}</small></span>
+            <i>›</i>
           </button>
         </div>
 
@@ -243,22 +258,10 @@
           >
         </div>
         <section
-          v-if="previewImage && activeTool.id === 'background-remover'"
+          v-if="previewImage && ['refine', 'background', 'outline'].includes(activeTool.id)"
           class="cutout-studio"
         >
-          <div class="effect-tabs">
-            <button
-              v-for="tab in effectTabs"
-              :key="tab.id"
-              type="button"
-              :class="{ active: effectTab === tab.id }"
-              @click="effectTab = tab.id"
-            >
-              {{ tab.label }}
-            </button>
-          </div>
-
-          <div v-if="effectTab === 'refine'" class="effect-panel">
+          <div v-if="activeTool.id === 'refine'" class="effect-panel">
             <div class="brush-modes">
               <button
                 type="button"
@@ -297,7 +300,7 @@
             <p>直接在画布主体上拖动精修，操作可撤销。</p>
           </div>
 
-          <div v-else-if="effectTab === 'background'" class="effect-panel">
+          <div v-else-if="activeTool.id === 'background'" class="effect-panel">
             <div class="background-types">
               <button
                 v-for="item in backgroundTypes"
@@ -411,7 +414,7 @@
             v-show="previewImage"
             ref="previewCanvas"
             class="result-canvas"
-            :class="{ refining: effectTab === 'refine' }"
+            :class="{ refining: activeTool.id === 'refine' }"
             :style="canvasTransform"
             @pointerdown="startRefine"
             @pointermove="moveRefine"
@@ -549,8 +552,10 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
 import {
-  editorTools,
+  editorCategories,
+  getCategoryTools,
   resolveEditorTool,
+  type EditorCategoryId,
   type EditorToolDefinition,
 } from "@/features/editor/toolRegistry";
 import { ImageHistory } from "@/features/editor/imageHistory";
@@ -593,6 +598,7 @@ const fileName = ref("");
 const errorMessage = ref("");
 const tolerance = ref(28);
 const activeTool = ref(resolveEditorTool("background-remover"));
+const activeCategory = ref<EditorCategoryId>("cutout");
 const history = ref<ImageHistory | null>(null);
 const historyRevision = ref(0);
 const viewScale = ref(1);
@@ -614,12 +620,6 @@ const exportFormat = ref<"png" | "jpeg" | "webp">("png");
 const exportQuality = ref(90);
 const exportWidth = ref(1);
 const exportHeight = ref(1);
-const effectTab = ref<"refine" | "background" | "outline">("refine");
-const effectTabs = [
-  { id: "refine" as const, label: "精修" },
-  { id: "background" as const, label: "背景" },
-  { id: "outline" as const, label: "描边" },
-];
 const brushMode = ref<RefineBrushMode>("erase");
 const brushSize = ref(32);
 const brushHardness = ref(85);
@@ -658,6 +658,8 @@ const canRedo = computed(() => {
     ? (cutoutHistory.value?.canRedo ?? false)
     : (history.value?.canRedo ?? false);
 });
+const activeCategoryDefinition = computed(() => editorCategories.find(category => category.id === activeCategory.value) ?? editorCategories[0]!);
+const categoryTools = computed(() => getCategoryTools(activeCategory.value));
 const canvasTransform = computed(() => ({
   transform: `translate(${panX.value}px, ${panY.value}px) scale(${viewScale.value})`,
 }));
@@ -954,7 +956,7 @@ const refineAt = (event: PointerEvent): void => {
   void showPreview();
 };
 const startRefine = (event: PointerEvent): void => {
-  if (event.button !== 0 || effectTab.value !== "refine") return;
+  if (event.button !== 0 || activeTool.value.id !== "refine") return;
   isRefining.value = true;
   previewCanvas.value?.setPointerCapture(event.pointerId);
   refineAt(event);
@@ -988,13 +990,27 @@ const reselect = (): void => {
 };
 
 const selectTool = (toolId: EditorToolDefinition["id"]): void => {
-  activeTool.value = resolveEditorTool(toolId);
-  previewImage.value = null;
-  restoreImage.value = null;
-  cutoutHistory.value = null;
+  const tool = resolveEditorTool(toolId);
+  if (tool.requiresCutout && !previewImage.value) return;
+  const staysInCutoutResult = tool.categoryId === "cutout" && previewImage.value;
+  activeTool.value = tool;
+  activeCategory.value = tool.categoryId;
+  if (tool.id === "refine") brushMode.value = "erase";
+  if (!staysInCutoutResult) {
+    previewImage.value = null;
+    restoreImage.value = null;
+    cutoutHistory.value = null;
+  }
   selection.value = null;
   errorMessage.value = "";
-  void nextTick(drawEditor);
+  if (previewImage.value) void showPreview();
+  else void nextTick(drawEditor);
+};
+
+const selectCategory = (categoryId: EditorCategoryId): void => {
+  activeCategory.value = categoryId;
+  const firstTool = getCategoryTools(categoryId)[0];
+  if (firstTool) selectTool(firstTool.id);
 };
 
 const commitImage = (image: PixelImage): void => {
@@ -1316,6 +1332,10 @@ const downloadExport = (): void => {
 .rail-item.active {
   background: #fff0e6;
   color: #e8640c;
+}
+.rail-item:disabled {
+  color: #c4c9ce;
+  cursor: not-allowed;
 }
 .rail-icon {
   font-size: 21px;
@@ -1660,35 +1680,61 @@ const downloadExport = (): void => {
   color: #545c65;
   cursor: pointer;
 }
-.tool-grid {
+.category-tool-list {
   display: grid;
-  grid-template-columns: 1fr 1fr;
   gap: 7px;
   margin-bottom: 18px;
 }
-.tool-grid button {
-  min-height: 61px;
+.category-tool-list button {
+  min-height: 58px;
   border: 1px solid #e3e6e9;
   border-radius: 8px;
   background: #fafbfc;
   color: #616a73;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: center;
-  gap: 4px;
+  gap: 9px;
+  padding: 8px 10px;
+  text-align: left;
   cursor: pointer;
 }
-.tool-grid button span {
+.category-tool-list button > span:first-child {
   font-size: 18px;
+  text-align: center;
 }
-.tool-grid button b {
-  font-size: 10px;
+.category-tool-list .tool-copy {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
 }
-.tool-grid button.active {
+.category-tool-list b {
+  font-size: 11px;
+}
+.category-tool-list small {
+  overflow: hidden;
+  color: #9299a1;
+  font-size: 8px;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.category-tool-list i {
+  color: #a8afb6;
+  font-style: normal;
+}
+.category-tool-list button.active {
   border-color: #ff9d59;
   background: #fff3e9;
   color: #d95f0b;
+}
+.category-tool-list button:disabled {
+  background: #f5f6f7;
+  color: #b6bcc2;
+  cursor: not-allowed;
+}
+.category-tool-list button:disabled small {
+  color: #b6bcc2;
 }
 .operation-panel {
   display: grid;

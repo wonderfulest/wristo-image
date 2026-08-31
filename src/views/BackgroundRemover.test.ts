@@ -7,7 +7,7 @@ describe('ImageEditor', () => {
     const wrapper = mount(ImageEditor)
 
     expect(wrapper.find('[data-testid="editor-topbar"]').exists()).toBe(true)
-    expect(wrapper.get('[data-testid="tool-rail"]').text()).toContain('工具')
+    expect(wrapper.get('[data-testid="tool-rail"]').text()).toContain('抠图')
     expect(wrapper.get('[data-testid="tool-rail"]').text()).toContain('上传')
     expect(wrapper.get('[data-testid="tool-panel"]').text()).toContain('快速抠图')
     expect(wrapper.get('input[type="file"]').attributes('accept')).toBe('image/png,image/jpeg,image/webp')
@@ -41,5 +41,26 @@ describe('ImageEditor', () => {
     expect(controls.classes()).toContain('canvas-zoom-controls')
     expect(controls.findAll('button').map(button => button.text())).toEqual(['−', '100%', '＋', '适应'])
     expect(controls.findAll('button').every(button => button.attributes('disabled') !== undefined)).toBe(true)
+  })
+
+  it('organizes every supported tool into cutout and adjustment categories', async () => {
+    const wrapper = mount(ImageEditor)
+    const rail = wrapper.get('[data-testid="tool-rail"]')
+
+    expect(rail.text()).toContain('抠图')
+    expect(rail.text()).toContain('调整')
+    expect(rail.text()).toContain('上传')
+    expect(rail.text()).toContain('导出')
+    expect(wrapper.get('[data-testid="category-tool-list"]').text()).toContain('快速抠图')
+    expect(wrapper.get('[data-testid="category-tool-list"]').text()).toContain('精修')
+    expect(wrapper.get('[data-testid="category-tool-list"]').text()).toContain('背景替换')
+    expect(wrapper.get('[data-testid="category-tool-list"]').text()).toContain('描边')
+    expect(wrapper.get('[data-tool-id="refine"]').attributes('disabled')).toBeDefined()
+
+    await wrapper.get('[data-category-id="adjust"]').trigger('click')
+
+    expect(wrapper.get('[data-testid="category-tool-list"]').text()).toContain('裁剪')
+    expect(wrapper.get('[data-testid="category-tool-list"]').text()).toContain('调整尺寸')
+    expect(wrapper.get('[data-testid="category-tool-list"]').text()).toContain('旋转翻转')
   })
 })

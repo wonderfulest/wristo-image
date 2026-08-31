@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { editorTools, resolveEditorTool } from './toolRegistry'
+import { editorCategories, editorTools, getCategoryTools, resolveEditorTool } from './toolRegistry'
 
 describe('editor tool registry', () => {
   it('registers background removal as one editor function', () => {
@@ -9,10 +9,21 @@ describe('editor tool registry', () => {
     }))
   })
 
-  it('registers the first-stage geometry tools', () => {
+  it('registers every currently supported tool', () => {
     expect(editorTools.map(tool => tool.id)).toEqual([
-      'background-remover', 'crop', 'resize', 'rotate-flip',
+      'background-remover', 'refine', 'background', 'outline', 'crop', 'resize', 'rotate-flip',
     ])
+  })
+
+  it('groups tools into cutout and adjustment categories', () => {
+    expect(editorCategories.map(category => category.id)).toEqual(['cutout', 'adjust'])
+    expect(getCategoryTools('cutout').map(tool => tool.title)).toEqual(['快速抠图', '精修', '背景替换', '描边'])
+    expect(getCategoryTools('adjust').map(tool => tool.title)).toEqual(['裁剪', '调整尺寸', '旋转翻转'])
+  })
+
+  it('marks cutout follow-up tools as requiring a cutout result', () => {
+    expect(resolveEditorTool('refine').requiresCutout).toBe(true)
+    expect(resolveEditorTool('background-remover').requiresCutout).toBe(false)
   })
 
   it('falls back to background removal when an unknown tool is requested', () => {
