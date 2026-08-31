@@ -32,4 +32,14 @@ describe('ImageEditor', () => {
     expect(wrapper.get('[data-testid="tolerance-input"]').attributes('disabled')).toBeDefined()
     expect(wrapper.get('[data-testid="reset-button"]').attributes('disabled')).toBeDefined()
   })
+
+  it('shows manual zoom controls in the bottom-right corner of the canvas', () => {
+    const wrapper = mount(ImageEditor)
+    const stage = wrapper.get('.workspace-stage')
+    const controls = stage.get('[data-testid="canvas-zoom-controls"]')
+
+    expect(controls.classes()).toContain('canvas-zoom-controls')
+    expect(controls.findAll('button').map(button => button.text())).toEqual(['−', '100%', '＋', '适应'])
+    expect(controls.findAll('button').every(button => button.attributes('disabled') !== undefined)).toBe(true)
+  })
 })
