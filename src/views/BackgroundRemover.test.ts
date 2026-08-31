@@ -1,19 +1,22 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
-import BackgroundRemover from './BackgroundRemover.vue'
+import ImageEditor from './ImageEditor.vue'
 
-describe('BackgroundRemover', () => {
-  it('starts with a local image import action and no enabled export', () => {
-    const wrapper = mount(BackgroundRemover)
+describe('ImageEditor', () => {
+  it('starts in the unified editor shell with background remover selected', () => {
+    const wrapper = mount(ImageEditor)
 
-    expect(wrapper.get('h1').text()).toBe('快速抠图')
+    expect(wrapper.find('[data-testid="editor-topbar"]').exists()).toBe(true)
+    expect(wrapper.get('[data-testid="tool-rail"]').text()).toContain('工具')
+    expect(wrapper.get('[data-testid="tool-rail"]').text()).toContain('上传')
+    expect(wrapper.get('[data-testid="tool-panel"]').text()).toContain('快速抠图')
     expect(wrapper.get('input[type="file"]').attributes('accept')).toBe('image/png,image/jpeg,image/webp')
     expect(wrapper.get('[data-testid="download-button"]').attributes('disabled')).toBeDefined()
     expect(wrapper.text()).toContain('图片仅在当前浏览器中处理')
   })
 
   it('shows a specific error when the chosen format is unsupported', async () => {
-    const wrapper = mount(BackgroundRemover)
+    const wrapper = mount(ImageEditor)
     const file = new File(['svg'], 'icon.svg', { type: 'image/svg+xml' })
     const input = wrapper.get('input[type="file"]')
     Object.defineProperty(input.element, 'files', { value: [file], configurable: true })
@@ -24,7 +27,7 @@ describe('BackgroundRemover', () => {
   })
 
   it('keeps processing controls disabled until a selection has produced a subject', () => {
-    const wrapper = mount(BackgroundRemover)
+    const wrapper = mount(ImageEditor)
 
     expect(wrapper.get('[data-testid="tolerance-input"]').attributes('disabled')).toBeDefined()
     expect(wrapper.get('[data-testid="reset-button"]').attributes('disabled')).toBeDefined()

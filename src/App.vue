@@ -1,6 +1,6 @@
 <template>
   <div class="app-shell">
-    <header class="site-header">
+    <header v-if="!route.meta.editor" class="site-header">
       <RouterLink class="brand" to="/" aria-label="Wristo Image 首页">
         <span class="brand-mark"><i /><i /></span>
         <span>Wristo <b>Image</b></span>
@@ -14,3 +14,9 @@
     <RouterView />
   </div>
 </template>
+
+<script setup lang="ts">
+import { useRoute } from 'vue-router'
+
+const route = useRoute()
+</script>
