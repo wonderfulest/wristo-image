@@ -16,6 +16,7 @@
   "dependencies": {
     "@fontsource-variable/bricolage-grotesque": "^5.2.8",
     "@fontsource-variable/instrument-sans": "^5.2.8",
+    "fflate": "^0.8.3",
     "vue": "^3.5.22",
     "vue-router": "^4.6.3"
   },

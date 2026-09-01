@@ -563,8 +563,10 @@
         />
         <ImageHistoryPanel
           :images="localHistoryImages"
+          :downloading="isDownloadingHistoryZip"
           @select="loadHistoryImage"
           @download="downloadHistoryImage"
+          @download-selected="downloadSelectedHistory"
           @delete="deleteHistoryImage"
           @clear="clearImageHistory"
         />
@@ -660,6 +662,10 @@ import { consumeWheelZoom } from "@/features/editor/zoomControl";
 import { resolveBrushCursor } from "@/features/editor/brushCursor";
 import { downloadBlob } from "@/features/editor/downloadBlob";
 import {
+  createHistoryZip,
+  historyZipFileName,
+} from "@/features/editor/downloadHistoryZip";
+import {
   HISTORY_PANEL_WIDTH_STORAGE_KEY,
   loadHistoryPanelWidth,
   normalizeHistoryPanelWidth,
@@ -750,6 +756,7 @@ const exportQuality = ref(90);
 const exportWidth = ref(1);
 const exportHeight = ref(1);
 const isSavingCanvas = ref(false);
+const isDownloadingHistoryZip = ref(false);
 const localHistoryEntries = ref<LocalImageHistoryEntry[]>([]);
 const localHistoryImages = ref<ImageHistoryPanelItem[]>([]);
 const historyPanelWidth = ref(loadHistoryPanelWidth(window.localStorage));
@@ -1101,6 +1108,28 @@ const downloadHistoryImage = (id: string): void => {
   const entry = localHistoryEntries.value.find((image) => image.id === id);
   if (!entry) return;
   downloadBlob(entry.blob, entry.name);
+};
+
+const downloadSelectedHistory = async (ids: string[]): Promise<void> => {
+  if (isDownloadingHistoryZip.value) return;
+  const selectedIds = new Set(ids);
+  const entries = localHistoryEntries.value.filter(entry => selectedIds.has(entry.id));
+  if (!entries.length) return;
+
+  isDownloadingHistoryZip.value = true;
+  errorMessage.value = "";
+  try {
+    const archive = await createHistoryZip(entries.map(entry => ({
+      name: entry.name,
+      blob: entry.blob,
+    })));
+    downloadBlob(archive, historyZipFileName());
+  } catch (error) {
+    console.warn("无法打包历史图片：", error);
+    errorMessage.value = "历史图片打包失败，请稍后重试。";
+  } finally {
+    isDownloadingHistoryZip.value = false;
+  }
 };
 
 const deleteHistoryImage = async (id: string): Promise<void> => {

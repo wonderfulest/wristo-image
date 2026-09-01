@@ -15,12 +15,28 @@
 
     <p class="local-description"><i />仅保存在当前浏览器</p>
 
+    <div v-if="images.length" class="batch-toolbar" aria-label="批量操作">
+      <button
+        data-testid="select-all-history-images"
+        type="button"
+        @click="toggleAll"
+      >{{ allSelected ? '取消全选' : '全选' }}</button>
+      <span>{{ selectedCount ? `已选 ${selectedCount} 张` : '选择图片后批量下载' }}</span>
+      <button
+        data-testid="download-selected-history"
+        class="batch-download"
+        type="button"
+        :disabled="!selectedCount || downloading"
+        @click="emitSelected"
+      >{{ downloading ? '正在打包…' : '下载 ZIP' }}</button>
+    </div>
+
     <div v-if="images.length" class="history-grid">
       <article
         v-for="image in images"
         :key="image.id"
         data-testid="history-image"
-        class="history-image"
+        :class="['history-image', { selected: selectedIds.has(image.id) }]"
         role="button"
         tabindex="0"
         :title="`重新编辑 ${image.name}`"
@@ -28,6 +44,16 @@
         @keydown.enter="emit('select', image.id)"
         @keydown.space.prevent="emit('select', image.id)"
       >
+        <label class="history-image-selector" @click.stop>
+          <input
+            data-testid="select-history-image"
+            type="checkbox"
+            :checked="selectedIds.has(image.id)"
+            :aria-label="`选择 ${image.name}`"
+            @change="onSelectionChange(image.id, $event)"
+          />
+          <span aria-hidden="true">✓</span>
+        </label>
         <img :src="image.previewUrl" :alt="image.name" />
         <span class="history-image-copy">
           <b>{{ image.name }}</b>
@@ -75,7 +101,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import AppConfirmDialog from '@/components/ui/AppConfirmDialog.vue'
 
 export type ImageHistoryPanelItem = {
@@ -90,6 +116,7 @@ export type ImageHistoryPanelItem = {
 const emit = defineEmits<{
   select: [id: string]
   download: [id: string]
+  downloadSelected: [ids: string[]]
   delete: [id: string]
   clear: []
 }>()
@@ -98,8 +125,42 @@ type PendingAction =
   | { type: 'delete'; image: ImageHistoryPanelItem }
   | { type: 'clear' }
 
-const props = defineProps<{ images: ImageHistoryPanelItem[] }>()
+const props = withDefaults(defineProps<{
+  images: ImageHistoryPanelItem[]
+  downloading?: boolean
+}>(), {
+  downloading: false,
+})
 const pendingAction = ref<PendingAction | null>(null)
+const selectedIds = ref(new Set<string>())
+const selectedCount = computed(() => selectedIds.value.size)
+const allSelected = computed(() =>
+  props.images.length > 0 && props.images.every(image => selectedIds.value.has(image.id)),
+)
+
+watch(
+  () => props.images.map(image => image.id),
+  (imageIds) => {
+    const validIds = new Set(imageIds)
+    selectedIds.value = new Set([...selectedIds.value].filter(id => validIds.has(id)))
+  },
+)
+
+const onSelectionChange = (id: string, event: Event): void => {
+  const next = new Set(selectedIds.value)
+  if ((event.target as HTMLInputElement).checked) next.add(id)
+  else next.delete(id)
+  selectedIds.value = next
+}
+const toggleAll = (): void => {
+  selectedIds.value = allSelected.value
+    ? new Set()
+    : new Set(props.images.map(image => image.id))
+}
+const emitSelected = (): void => {
+  if (!selectedCount.value || props.downloading) return
+  emit('downloadSelected', props.images.filter(image => selectedIds.value.has(image.id)).map(image => image.id))
+}
 
 const confirmationTitle = computed(() =>
   pendingAction.value?.type === 'clear' ? '清空全部历史图片？' : '删除这张历史图片？',
@@ -139,7 +200,7 @@ const confirmAction = (): void => {
   border-left: 1px solid #dfe3e7;
   padding: 18px 14px 12px;
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
   gap: 12px;
   overflow: hidden;
   box-shadow: -5px 0 18px rgba(31, 40, 49, 0.035);
@@ -181,6 +242,44 @@ const confirmAction = (): void => {
   border-radius: 50%;
   background: #3fcb83;
 }
+.batch-toolbar {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid #ece3dc;
+  border-radius: 7px;
+  background: #fffaf6;
+  color: #8a786c;
+  font-size: 8px;
+}
+.batch-toolbar span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.batch-toolbar button {
+  border: 0;
+  background: transparent;
+  color: #a05a2c;
+  padding: 2px;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+.batch-toolbar .batch-download {
+  border-radius: 5px;
+  background: #24282e;
+  color: #fff;
+  padding: 5px 7px;
+}
+.batch-toolbar .batch-download:disabled {
+  background: #d8dadd;
+  cursor: not-allowed;
+}
 .history-grid {
   min-height: 0;
   display: grid;
@@ -205,6 +304,45 @@ const confirmAction = (): void => {
 .history-image:hover {
   border-color: #ff9d59;
   box-shadow: 0 3px 10px rgba(49, 38, 30, 0.08);
+}
+.history-image.selected {
+  border-color: #f48a43;
+  box-shadow: 0 0 0 2px rgba(244, 138, 67, 0.16);
+}
+.history-image-selector {
+  position: absolute;
+  top: 7px;
+  left: 7px;
+  width: 20px;
+  height: 20px;
+  z-index: 1;
+  cursor: pointer;
+}
+.history-image-selector input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.history-image-selector span {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  border-radius: 5px;
+  background: rgba(25, 29, 33, 0.68);
+  color: transparent;
+  font-size: 11px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.14);
+}
+.history-image-selector input:checked + span {
+  border-color: #f48a43;
+  background: #f48a43;
+  color: #fff;
+}
+.history-image-selector input:focus-visible + span {
+  outline: 2px solid #24282e;
+  outline-offset: 2px;
 }
 .history-image img {
   width: 100%;

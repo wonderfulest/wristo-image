@@ -50,6 +50,35 @@ describe('ImageHistoryPanel', () => {
     expect(wrapper.emitted('select')).toBeUndefined()
   })
 
+  it('selects images without opening them and emits a batch ZIP request in image order', async () => {
+    const wrapper = mount(ImageHistoryPanel, { props: { images } })
+
+    await wrapper.findAll('[data-testid="select-history-image"]')[1]!.setValue(true)
+    await wrapper.findAll('[data-testid="select-history-image"]')[0]!.setValue(true)
+
+    expect(wrapper.emitted('select')).toBeUndefined()
+    expect(wrapper.text()).toContain('已选 2 张')
+
+    await wrapper.get('[data-testid="download-selected-history"]').trigger('click')
+
+    expect(wrapper.emitted('downloadSelected')?.[0]).toEqual([['new', 'old']])
+  })
+
+  it('selects all images and removes selections that disappear from the list', async () => {
+    const wrapper = mount(ImageHistoryPanel, { props: { images } })
+
+    await wrapper.get('[data-testid="select-all-history-images"]').trigger('click')
+    expect(wrapper.findAll<HTMLInputElement>('[data-testid="select-history-image"]')).toSatisfy(
+      (checkboxes: Array<{ element: HTMLInputElement }>) =>
+        checkboxes.every((checkbox) => checkbox.element.checked),
+    )
+
+    await wrapper.setProps({ images: [images[0]!] })
+    await wrapper.get('[data-testid="download-selected-history"]').trigger('click')
+
+    expect(wrapper.emitted('downloadSelected')?.[0]).toEqual([['new']])
+  })
+
   it('waits for confirmation before clearing every history image', async () => {
     const wrapper = mount(ImageHistoryPanel, { props: { images } })
 
