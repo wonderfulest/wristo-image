@@ -285,12 +285,14 @@ const confirmAction = (): void => {
   display: grid;
   align-content: start;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-auto-rows: max-content;
   gap: 9px;
   overflow-y: auto;
   padding-right: 2px;
 }
 .history-image {
   position: relative;
+  align-self: start;
   min-width: 0;
   border: 1px solid #e1e4e8;
   border-radius: 8px;
