@@ -16,8 +16,7 @@ export default createRouter({
     },
     {
       path: '/tools/image-compressor',
-      name: 'image-compressor',
-      component: () => import('@/views/ImageCompressor.vue'),
+      redirect: { path: '/editor', query: { tool: 'image-compressor' } },
     },
   ],
   scrollBehavior: () => ({ top: 0 }),

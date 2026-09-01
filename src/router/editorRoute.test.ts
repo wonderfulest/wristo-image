@@ -15,9 +15,9 @@ describe('image editor routes', () => {
     expect(route?.redirect).toEqual({ path: '/editor', query: { tool: 'background-remover' } })
   })
 
-  it('registers a standalone image compressor route', () => {
+  it('redirects the former standalone compressor route into the editor tool', () => {
     const route = router.getRoutes().find(candidate => candidate.path === '/tools/image-compressor')
 
-    expect(route?.name).toBe('image-compressor')
+    expect(route?.redirect).toEqual({ path: '/editor', query: { tool: 'image-compressor' } })
   })
 })

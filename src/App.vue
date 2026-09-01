@@ -6,9 +6,9 @@
         <span>Wristo <b>Image</b></span>
       </RouterLink>
       <nav aria-label="主导航">
-        <RouterLink to="/">工具</RouterLink>
-        <RouterLink to="/tools/background-remover">快速抠图</RouterLink>
-        <RouterLink to="/tools/image-compressor">图片压缩</RouterLink>
+        <RouterLink to="/editor">图片编辑器</RouterLink>
+        <RouterLink to="/#all-tools">全部工具</RouterLink>
+        <RouterLink to="/editor?tool=image-compressor">图片压缩</RouterLink>
       </nav>
       <span class="local-chip"><span /> 本地处理</span>
     </header>
