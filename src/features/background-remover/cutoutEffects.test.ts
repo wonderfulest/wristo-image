@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { PixelImage } from './imageProcessor'
-import { applyContentAwareErase, applyRefineBrush, renderCutout } from './cutoutEffects'
+import { applyContentAwareErase, applyContentAwareFill, applyRefineBrush, renderCutout } from './cutoutEffects'
 
 const image = (width: number, height: number, pixels: number[]): PixelImage => ({
   width,
@@ -52,6 +52,31 @@ describe('applyContentAwareErase', () => {
 
     expect(repaired.data[(4 * 9 + 4) * 4 + 3]).toBe(255)
     expect(repaired.data[(4 * 9 + 2) * 4]).toBeCloseTo(20, 0)
+  })
+})
+
+describe('applyContentAwareFill', () => {
+  it('continues the surrounding gradient through a rectangular selection without a hard edge', () => {
+    const pixels = Array.from({ length: 7 * 7 }, (_, index) => {
+      const x = index % 7
+      const insideSelection = x >= 2 && x <= 4 && Math.floor(index / 7) >= 2 && Math.floor(index / 7) <= 4
+      const value = insideSelection ? 240 : x * 10
+      return [value, value, value, 255]
+    }).flat()
+
+    const repaired = applyContentAwareFill(image(7, 7, pixels), {
+      x: 2,
+      y: 2,
+      width: 3,
+      height: 3,
+    })
+
+    const valueAt = (x: number, y: number): number => repaired.data[(y * 7 + x) * 4] ?? -1
+    expect(valueAt(2, 3)).toBeLessThan(30)
+    expect(valueAt(3, 3)).toBeCloseTo(30, -1)
+    expect(valueAt(4, 3)).toBeGreaterThan(30)
+    expect(Math.abs(valueAt(2, 3) - valueAt(1, 3))).toBeLessThanOrEqual(10)
+    expect(Math.abs(valueAt(5, 3) - valueAt(4, 3))).toBeLessThanOrEqual(10)
   })
 })
 

@@ -184,7 +184,21 @@
           v-if="activeTool.id === 'background-fill'"
           class="panel-section operation-panel"
         >
-          <label
+          <div class="background-fill-modes">
+            <button
+              data-testid="background-fill-mode-color"
+              type="button"
+              :class="{ active: backgroundFillMode === 'color' }"
+              @click="backgroundFillMode = 'color'"
+            >纯色填充</button>
+            <button
+              data-testid="background-fill-mode-content"
+              type="button"
+              :class="{ active: backgroundFillMode === 'content' }"
+              @click="backgroundFillMode = 'content'"
+            >内容填充</button>
+          </div>
+          <label v-if="backgroundFillMode === 'color'"
             >填充颜色
             <input
               data-testid="background-fill-color"
@@ -192,7 +206,8 @@
               type="color"
             />
           </label>
-          <p>每次框选后立即填色，可连续框选；修改颜色会用于下一次框选。</p>
+          <p v-if="backgroundFillMode === 'color'">每次框选后立即填色，可连续框选；修改颜色会用于下一次框选。</p>
+          <p v-else>根据选区四周的背景自动补齐，并平滑过渡边缘；选区应完整覆盖要移除的内容。</p>
         </section>
 
         <section
@@ -635,6 +650,7 @@ import {
 } from "@/features/editor/canvasHistorySave";
 import {
   applyContentAwareErase,
+  applyContentAwareFill,
   applyRefineBrush,
   renderCutout,
   type CutoutBackground,
@@ -737,6 +753,7 @@ const backgroundTypes = [
 ];
 const backgroundColor = ref("#ffffff");
 const backgroundFillColor = ref("#ffffff");
+const backgroundFillMode = ref<"color" | "content">("color");
 const gradientFrom = ref("#ff8124");
 const gradientTo = ref("#191d24");
 const backgroundImage = ref<PixelImage | null>(null);
@@ -751,10 +768,14 @@ const cropRatios = [
 ];
 const canUndo = computed(() => {
   historyRevision.value;
+  if (previewImage.value && isBrushTool(activeTool.value.id))
+    return toolSession.value?.canUndo ?? false;
   return !previewImage.value && (history.value?.canUndo ?? false);
 });
 const canRedo = computed(() => {
   historyRevision.value;
+  if (previewImage.value && isBrushTool(activeTool.value.id))
+    return toolSession.value?.canRedo ?? false;
   return !previewImage.value && (history.value?.canRedo ?? false);
 });
 const activeCategoryDefinition = computed(() => editorCategories.find(category => category.id === activeCategory.value) ?? editorCategories[0]!);
@@ -784,7 +805,9 @@ const workspaceMessage = computed(() =>
       : activeTool.value.id === "crop"
         ? "拖动鼠标创建裁剪区域"
         : activeTool.value.id === "background-fill"
-          ? "拖动鼠标框选要填色的背景区域"
+          ? backgroundFillMode.value === "content"
+            ? "拖动鼠标框选要移除并自动补齐的区域"
+            : "拖动鼠标框选要填色的背景区域"
         : activeTool.value.id === "background-remover"
           ? "拖动鼠标框选要保留的图标"
           : "图片预览",
@@ -1166,11 +1189,13 @@ const processSelection = (): void => {
 
 const applyBackgroundFill = (): void => {
   if (!sourceImage.value || !selection.value) return;
-  const filled = fillSelectionWithColor(
-    sourceImage.value,
-    selection.value,
-    backgroundFillColor.value,
-  );
+  const filled = backgroundFillMode.value === "content"
+    ? applyContentAwareFill(sourceImage.value, selection.value)
+    : fillSelectionWithColor(
+        sourceImage.value,
+        selection.value,
+        backgroundFillColor.value,
+      );
   commitImage(filled);
   errorMessage.value = "";
 };
@@ -1196,8 +1221,8 @@ const refineAt = (event: PointerEvent): void => {
   if (!previewImage.value || !toolSession.value) return;
   const point = pointInPreviewSubject(event);
   if (!point) return;
+  refineStrokePoints.value.push(point);
   if (brushMode.value === "erase") {
-    refineStrokePoints.value.push(point);
     return;
   }
   previewImage.value = toolSession.value.preview(applyRefineBrush(
@@ -1234,14 +1259,17 @@ const finishRefine = (): void => {
   if (!isRefining.value || !previewImage.value) return;
   isRefining.value = false;
   if (brushMode.value === "erase" && refineStrokePoints.value.length && toolSession.value) {
-    previewImage.value = toolSession.value.preview(applyContentAwareErase(previewImage.value, {
+    previewImage.value = toolSession.value.commitStep(applyContentAwareErase(previewImage.value, {
       points: refineStrokePoints.value,
       size: brushSize.value,
       hardness: brushHardness.value,
     }));
-    refineStrokePoints.value = [];
-    void showPreview();
+  } else if (brushMode.value === "restore" && refineStrokePoints.value.length && toolSession.value) {
+    previewImage.value = toolSession.value.commitStep(previewImage.value);
   }
+  refineStrokePoints.value = [];
+  historyRevision.value += 1;
+  void showPreview();
 };
 
 const cancelToolPreview = (showNotice = false): void => {
@@ -1328,9 +1356,21 @@ const restoreHistory = (image: PixelImage): void => {
   void nextTick(drawEditor);
 };
 const undo = (): void => {
+  if (previewImage.value && isBrushTool(activeTool.value.id) && toolSession.value?.canUndo) {
+    previewImage.value = toolSession.value.undo();
+    historyRevision.value += 1;
+    void showPreview();
+    return;
+  }
   if (history.value?.canUndo) restoreHistory(history.value.undo());
 };
 const redo = (): void => {
+  if (previewImage.value && isBrushTool(activeTool.value.id) && toolSession.value?.canRedo) {
+    previewImage.value = toolSession.value.redo();
+    historyRevision.value += 1;
+    void showPreview();
+    return;
+  }
   if (history.value?.canRedo) restoreHistory(history.value.redo());
 };
 const applyRotate = (direction: "clockwise" | "counter-clockwise"): void => {
@@ -2420,6 +2460,25 @@ const downloadExport = (): void => {
   cursor: pointer;
 }
 .background-types button.active {
+  border-color: #ff9d59;
+  background: #fff0e6;
+  color: #d95f0b;
+}
+.background-fill-modes {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+}
+.background-fill-modes button {
+  border: 1px solid #dfe3e7;
+  background: #fff;
+  border-radius: 6px;
+  padding: 8px 4px;
+  color: #68717a;
+  font-size: 10px;
+  cursor: pointer;
+}
+.background-fill-modes button.active {
   border-color: #ff9d59;
   background: #fff0e6;
   color: #d95f0b;

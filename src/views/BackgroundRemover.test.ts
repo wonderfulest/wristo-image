@@ -168,11 +168,18 @@ describe('ImageEditor', () => {
     await vi.waitFor(() => expect(wrapper.get('[data-tool-id="smart-erase"]').attributes('disabled')).toBeUndefined())
 
     await wrapper.get('[data-tool-id="background-fill"]').trigger('click')
+    expect(wrapper.get('[data-testid="background-fill-mode-color"]').classes()).toContain('active')
+    expect(wrapper.get('[data-testid="background-fill-mode-content"]').text()).toBe('内容填充')
     expect(wrapper.get('[data-testid="background-fill-color"]').attributes('type')).toBe('color')
     expect((wrapper.get('[data-testid="background-fill-color"]').element as HTMLInputElement).value).toBe('#ffffff')
     expect(wrapper.find('[data-testid="background-fill-tolerance"]').exists()).toBe(false)
     expect(wrapper.text()).toContain('每次框选后立即填色，可连续框选')
     expect(wrapper.find('[data-testid="tool-preview-actions"]').exists()).toBe(false)
+
+    await wrapper.get('[data-testid="background-fill-mode-content"]').trigger('click')
+    expect(wrapper.get('[data-testid="background-fill-mode-content"]').classes()).toContain('active')
+    expect(wrapper.find('[data-testid="background-fill-color"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('根据选区四周的背景自动补齐')
 
     const editorCanvas = wrapper.get('.workspace-stage canvas:not(.result-canvas)')
     vi.spyOn(editorCanvas.element, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, width: 4, height: 4 } as DOMRect)
@@ -219,5 +226,57 @@ describe('ImageEditor', () => {
     await wrapper.get('[data-testid="tool-preview-actions"] .primary-operation').trigger('click')
     expect(wrapper.find('[data-testid="tool-preview-actions"]').exists()).toBe(false)
     expect(wrapper.get('.history-actions button[title="撤销"]').attributes('disabled')).toBeUndefined()
+  })
+
+  it('undoes and redoes smart erase strokes one at a time before applying', async () => {
+    const pixels = new Uint8ClampedArray(4 * 4 * 4).fill(255)
+    vi.stubGlobal('createImageBitmap', vi.fn(async () => ({ width: 4, height: 4, close: vi.fn() })))
+    vi.stubGlobal('ImageData', class { constructor(public data: Uint8ClampedArray, public width: number, public height: number) {} })
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+      drawImage: vi.fn(),
+      getImageData: vi.fn(() => ({ width: 4, height: 4, data: pixels })),
+      putImageData: vi.fn(),
+      save: vi.fn(), restore: vi.fn(), beginPath: vi.fn(), rect: vi.fn(), fill: vi.fn(),
+      strokeRect: vi.fn(), setLineDash: vi.fn(),
+    } as unknown as CanvasRenderingContext2D)
+
+    const wrapper = mount(ImageEditor)
+    const input = wrapper.get('input[type="file"]')
+    Object.defineProperty(input.element, 'files', {
+      value: [new File(['image'], 'icon.png', { type: 'image/png' })],
+      configurable: true,
+    })
+    await input.trigger('change')
+    await vi.waitFor(() => expect(wrapper.get('[data-tool-id="smart-erase"]').attributes('disabled')).toBeUndefined())
+    await wrapper.get('[data-tool-id="smart-erase"]').trigger('click')
+
+    const canvas = wrapper.get('canvas.result-canvas')
+    vi.spyOn(canvas.element, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, width: 4, height: 4 } as DOMRect)
+    Object.defineProperty(canvas.element, 'setPointerCapture', { value: vi.fn(), configurable: true })
+    const stroke = async (x: number): Promise<void> => {
+      canvas.element.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: x, clientY: 2 }))
+      canvas.element.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, button: 0, clientX: x, clientY: 2 }))
+      await wrapper.vm.$nextTick()
+    }
+
+    await stroke(1)
+    await stroke(3)
+    const undoButton = wrapper.get('.history-actions button[title="撤销"]')
+    const redoButton = wrapper.get('.history-actions button[title="重做"]')
+    expect(undoButton.attributes('disabled')).toBeUndefined()
+
+    await undoButton.trigger('click')
+    expect(undoButton.attributes('disabled')).toBeUndefined()
+    expect(redoButton.attributes('disabled')).toBeUndefined()
+    await undoButton.trigger('click')
+    expect(undoButton.attributes('disabled')).toBeDefined()
+    await redoButton.trigger('click')
+    expect(undoButton.attributes('disabled')).toBeUndefined()
+
+    await wrapper.get('[data-testid="tool-preview-actions"] .primary-operation').trigger('click')
+    expect(wrapper.find('canvas.result-canvas').isVisible()).toBe(false)
+    expect(undoButton.attributes('disabled')).toBeUndefined()
+    await undoButton.trigger('click')
+    expect(undoButton.attributes('disabled')).toBeDefined()
   })
 })

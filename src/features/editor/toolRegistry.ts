@@ -23,7 +23,7 @@ export const editorCategories: readonly EditorCategoryDefinition[] = [
 export const editorTools: readonly EditorToolDefinition[] = [
   { id: 'background-remover', categoryId: 'cutout', title: '快速抠图', description: '框选图片中的图标，清除选区内全部近似背景色，包括封闭区域。', icon: '✦' },
   { id: 'smart-erase', categoryId: 'cutout', title: '智能擦除', description: '涂抹不需要的区域，并用周围背景智能补齐。', icon: '◌' },
-  { id: 'background-fill', categoryId: 'cutout', title: '背景填色', description: '框选矩形区域，将区域内全部像素填充为指定颜色。', icon: '▣' },
+  { id: 'background-fill', categoryId: 'cutout', title: '背景填色', description: '框选矩形区域，使用纯色或周围背景内容进行填充。', icon: '▣' },
   { id: 'restore', categoryId: 'cutout', title: '恢复', description: '用画笔从原图重新显露被移除的区域。', icon: '↺' },
   { id: 'background', categoryId: 'cutout', title: '背景替换', description: '为当前画布设置纯色、渐变或自定义图片背景。', icon: '▧' },
   { id: 'outline', categoryId: 'cutout', title: '描边', description: '为当前画布中的透明主体增加可调外描边。', icon: '◎' },

@@ -1,4 +1,4 @@
-import type { PixelImage } from './imageProcessor'
+import { normalizeSelection, type PixelImage, type SelectionRect } from './imageProcessor'
 
 export type RefineBrushMode = 'erase' | 'restore'
 
@@ -145,6 +145,39 @@ export const applyContentAwareErase = (
     for (let channel = 0; channel < 4; channel += 1) {
       const current = source.data[offset + channel] ?? 0
       result.data[offset + channel] = Math.round(current + ((relaxed[offset + channel] ?? current) - current) * strength)
+    }
+  }
+  return result
+}
+
+export const applyContentAwareFill = (
+  source: PixelImage,
+  selection: SelectionRect,
+): PixelImage => {
+  const result = cloneImage(source)
+  const normalized = normalizeSelection(selection, source.width, source.height)
+  if (!normalized) throw new RangeError('Selection must contain at least one pixel')
+
+  const right = normalized.x + normalized.width
+  const bottom = normalized.y + normalized.height
+  for (let y = normalized.y; y < bottom; y += 1) {
+    for (let x = normalized.x; x < right; x += 1) {
+      const samples: Array<{ offset: number; weight: number }> = []
+      if (normalized.x > 0) samples.push({ offset: (y * source.width + normalized.x - 1) * 4, weight: 1 / (x - normalized.x + 1) })
+      if (right < source.width) samples.push({ offset: (y * source.width + right) * 4, weight: 1 / (right - x) })
+      if (normalized.y > 0) samples.push({ offset: ((normalized.y - 1) * source.width + x) * 4, weight: 1 / (y - normalized.y + 1) })
+      if (bottom < source.height) samples.push({ offset: (bottom * source.width + x) * 4, weight: 1 / (bottom - y) })
+      if (!samples.length) continue
+
+      const targetOffset = (y * source.width + x) * 4
+      const totalWeight = samples.reduce((total, sample) => total + sample.weight, 0)
+      for (let channel = 0; channel < 4; channel += 1) {
+        const weightedValue = samples.reduce(
+          (total, sample) => total + (source.data[sample.offset + channel] ?? 0) * sample.weight,
+          0,
+        )
+        result.data[targetOffset + channel] = Math.round(weightedValue / totalWeight)
+      }
     }
   }
   return result
