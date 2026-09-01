@@ -69,16 +69,18 @@
     >
       <nav data-testid="tool-rail" class="tool-rail" aria-label="编辑工具">
         <button
-          v-for="category in editorCategories"
-          :key="category.id"
+          v-for="tool in editorTools"
+          :key="tool.id"
           type="button"
           class="rail-item"
-          :class="{ active: activeCategory === category.id }"
-          :data-category-id="category.id"
-          @click="selectCategory(category.id)"
+          :class="{ active: activeTool.id === tool.id }"
+          :data-tool-id="tool.id"
+          :disabled="!sourceImage"
+          :title="!sourceImage ? '请先上传图片' : tool.description"
+          @click="selectTool(tool.id)"
         >
-          <span class="rail-icon">{{ category.icon }}</span
-          ><b>{{ category.title }}</b>
+          <span class="rail-icon">{{ tool.icon }}</span
+          ><b>{{ tool.title }}</b>
         </button>
         <button class="rail-item" type="button" @click="fileInput?.click()">
           <span class="rail-icon">↥</span><b>上传</b>
@@ -235,6 +237,9 @@
               v-for="ratio in cropRatios"
               :key="ratio.label"
               type="button"
+              :data-crop-ratio="ratio.value ?? 'free'"
+              :aria-pressed="selectedCropRatio === ratio.value"
+              :class="{ active: selectedCropRatio === ratio.value }"
               @click="setCropRatio(ratio.value)"
             >
               {{ ratio.label }}
@@ -261,6 +266,12 @@
           v-if="activeTool.id === 'resize'"
           class="panel-section operation-panel"
         >
+          <div class="section-title"><span>常用尺寸</span></div>
+          <div class="resize-presets">
+            <button type="button" data-resize-preset="1440x720" @click="setResizeSize(1440, 720)">
+              Banner <strong>1440 × 720</strong>
+            </button>
+          </div>
           <label
             >宽度
             <input
@@ -268,7 +279,6 @@
               type="number"
               min="1"
               max="8192"
-              @input="syncResize('width')"
             />
             px</label
           >
@@ -279,13 +289,17 @@
               type="number"
               min="1"
               max="8192"
-              @input="syncResize('height')"
             />
             px</label
           >
-          <label class="lock-row"
-            ><input v-model="lockRatio" type="checkbox" /> 锁定原始比例</label
-          >
+          <label>模式
+            <select v-model="resizeMode" data-testid="resize-mode" @change="persistResizeMode">
+              <option value="cover">裁切铺满</option>
+              <option value="contain">完整适应</option>
+              <option value="stretch">拉伸填满</option>
+            </select>
+          </label>
+          <p>{{ resizeModeDescription }}</p>
           <button
             class="primary-operation"
             type="button"
@@ -300,6 +314,21 @@
           v-if="activeTool.id === 'rotate-flip'"
           class="panel-section operation-panel"
         >
+          <label class="rotation-angle-control">
+            旋转角度
+            <input
+              v-model.number="rotationAngle"
+              data-testid="rotation-angle"
+              type="number"
+              min="-360"
+              max="360"
+              step="0.1"
+              :disabled="!sourceImage"
+              @input="updateRotationPreview"
+            />
+            <span>°</span>
+          </label>
+          <p>正数顺时针，负数逆时针；画布会自动扩大以保留完整图片。</p>
           <div class="operation-grid">
             <button type="button" @click="applyRotate('counter-clockwise')">
               ↶<small>左转</small></button
@@ -413,7 +442,9 @@
           data-testid="tool-preview-actions"
         >
           <button type="button" class="preview-cancel" @click="cancelToolPreview()">取消</button>
-          <button type="button" class="primary-operation" @click="applyToolPreview">应用到画布</button>
+          <button type="button" class="primary-operation" @click="applyToolPreview">
+            {{ activeTool.id === 'rotate-flip' ? '应用旋转' : '应用到画布' }}
+          </button>
         </div>
         <p v-if="errorMessage" role="alert" class="editor-error">
           {{ errorMessage }}
@@ -463,20 +494,19 @@
           @pointercancel.capture="onStagePointerCancel"
         >
           <canvas
-            v-show="sourceImage && !previewImage"
             ref="editorCanvas"
-            :style="canvasTransform"
+            :style="editorCanvasStyle"
             @pointerdown="startSelection"
             @pointermove="moveSelection"
             @pointerup="finishSelection"
             @pointercancel="finishSelection"
+            @pointerleave="clearCropCursor"
           />
           <canvas
-            v-show="previewImage"
             ref="previewCanvas"
             class="result-canvas"
             :class="{ refining: isBrushTool(activeTool.id) }"
-            :style="canvasTransform"
+            :style="previewCanvasStyle"
             @pointerdown="startRefine"
             @pointermove="moveRefine"
             @pointerup="finishRefine"
@@ -636,6 +666,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import {
   editorCategories,
+  editorTools,
   getCategoryTools,
   resolveEditorTool,
   type EditorCategoryId,
@@ -654,12 +685,27 @@ import {
 } from "@/features/editor/exportSettings";
 import {
   cropImage,
+  fitImageToSize,
   flipImage,
   resizeImage,
   rotateImage,
+  rotateImageByAngle,
+  type ImageFitMode,
 } from "@/features/editor/imageOperations";
+import {
+  loadResizeMode,
+  saveResizeMode,
+} from "@/features/editor/resizePreferences";
 import { consumeWheelZoom } from "@/features/editor/zoomControl";
 import { resolveBrushCursor } from "@/features/editor/brushCursor";
+import {
+  createCropRect,
+  cropHandlePoints,
+  hitTestCropRect,
+  moveCropRect,
+  resizeCropRect,
+  type CropHandle,
+} from "@/features/editor/cropGeometry";
 import { downloadBlob } from "@/features/editor/downloadBlob";
 import {
   createHistoryZip,
@@ -716,6 +762,12 @@ const previewImage = ref<PixelImage | null>(null);
 const toolSession = ref<CanvasToolSession | null>(null);
 const selection = ref<SelectionRect | null>(null);
 const selectionStart = ref<{ x: number; y: number } | null>(null);
+const selectedCropRatio = ref<number | null>(null);
+const cropGesture = ref<{
+  handle: CropHandle;
+  pointer: { x: number; y: number };
+  rect: SelectionRect;
+} | null>(null);
 const fileName = ref("");
 const sourceMimeType = ref("");
 const errorMessage = ref("");
@@ -749,7 +801,13 @@ let pendingLongPress: {
 } | null = null;
 const resizeWidth = ref(1);
 const resizeHeight = ref(1);
-const lockRatio = ref(true);
+const resizeMode = ref<ImageFitMode>(loadResizeMode(window.localStorage));
+const resizeModeDescription = computed(() => ({
+  cover: "等比缩放并从中心裁切，铺满目标尺寸。",
+  contain: "完整保留图片，空余区域使用透明像素补齐。",
+  stretch: "直接填满目标尺寸，图片比例可能改变。",
+})[resizeMode.value]);
+const rotationAngle = ref<number | string>(0);
 const exportOpen = ref(false);
 const exportFormat = ref<ImageExportFormat>("png");
 const exportQuality = ref(90);
@@ -833,6 +891,14 @@ const activeCategoryDefinition = computed(() => editorCategories.find(category =
 const categoryTools = computed(() => getCategoryTools(activeCategory.value));
 const canvasTransform = computed(() => ({
   transform: `translate(${panX.value}px, ${panY.value}px) scale(${viewScale.value})`,
+}));
+const editorCanvasStyle = computed(() => ({
+  ...canvasTransform.value,
+  display: sourceImage.value && !previewImage.value ? "" : "none",
+}));
+const previewCanvasStyle = computed(() => ({
+  ...canvasTransform.value,
+  display: previewImage.value ? "" : "none",
 }));
 const brushCursor = computed(() => {
   viewScale.value;
@@ -949,6 +1015,20 @@ const drawEditor = (): void => {
   context.lineWidth = Math.max(2, image.width / 500);
   context.setLineDash([10, 8]);
   context.strokeRect(current.x, current.y, current.width, current.height);
+  if (activeTool.value.id === "crop") {
+    const renderedWidth = canvas.getBoundingClientRect().width;
+    const radius = renderedWidth ? (6 * canvas.width) / renderedWidth : Math.max(3, image.width / 160);
+    context.setLineDash([]);
+    context.fillStyle = "#ffffff";
+    context.strokeStyle = "#ff8124";
+    context.lineWidth = Math.max(1.5, radius / 3);
+    Object.values(cropHandlePoints(current)).forEach((point) => {
+      context.beginPath();
+      context.arc(point.x, point.y, radius, 0, Math.PI * 2);
+      context.fill();
+      context.stroke();
+    });
+  }
   context.restore();
 };
 
@@ -1195,6 +1275,24 @@ const pointInImage = (event: PointerEvent): { x: number; y: number } | null => {
   };
 };
 
+const cropCursors: Record<CropHandle, string> = {
+  nw: "nwse-resize", n: "ns-resize", ne: "nesw-resize", e: "ew-resize",
+  se: "nwse-resize", s: "ns-resize", sw: "nesw-resize", w: "ew-resize", move: "move",
+};
+const clearCropCursor = (): void => {
+  if (editorCanvas.value && !cropGesture.value) editorCanvas.value.style.cursor = "";
+};
+const updateCropCursor = (event: PointerEvent): void => {
+  if (activeTool.value.id !== "crop" || !selection.value || cropGesture.value) return;
+  const point = pointInImage(event);
+  const canvas = editorCanvas.value;
+  if (!point || !canvas) return;
+  const renderedWidth = canvas.getBoundingClientRect().width;
+  const radius = renderedWidth ? (12 * canvas.width) / renderedWidth : 12;
+  const handle = hitTestCropRect(point, selection.value, radius);
+  canvas.style.cursor = handle ? cropCursors[handle] : "crosshair";
+};
+
 const startSelection = (event: PointerEvent): void => {
   if (event.button !== 0) return;
   if (
@@ -1204,23 +1302,62 @@ const startSelection = (event: PointerEvent): void => {
     return;
   const point = pointInImage(event);
   if (!point) return;
+  if (activeTool.value.id === "crop" && selection.value) {
+    const canvas = editorCanvas.value;
+    const renderedWidth = canvas?.getBoundingClientRect().width ?? 0;
+    const hitRadius = renderedWidth && canvas ? (12 * canvas.width) / renderedWidth : 12;
+    const handle = hitTestCropRect(point, selection.value, hitRadius);
+    if (handle) {
+      cropGesture.value = { handle, pointer: point, rect: { ...selection.value } };
+      editorCanvas.value?.setPointerCapture?.(event.pointerId);
+      return;
+    }
+  }
   selectionStart.value = point;
   selection.value = { ...point, width: 0, height: 0 };
   editorCanvas.value?.setPointerCapture(event.pointerId);
 };
 const moveSelection = (event: PointerEvent): void => {
+  if (cropGesture.value && sourceImage.value) {
+    const point = pointInImage(event);
+    if (!point) return;
+    const gesture = cropGesture.value;
+    selection.value = gesture.handle === "move"
+      ? moveCropRect(gesture.rect, {
+          x: gesture.rect.x + point.x - gesture.pointer.x,
+          y: gesture.rect.y + point.y - gesture.pointer.y,
+        }, sourceImage.value)
+      : resizeCropRect(
+          gesture.rect,
+          gesture.handle,
+          point,
+          sourceImage.value,
+          selectedCropRatio.value,
+        );
+    drawEditor();
+    return;
+  }
+  updateCropCursor(event);
   if (!selectionStart.value) return;
   const point = pointInImage(event);
   if (!point) return;
-  selection.value = {
-    x: selectionStart.value.x,
-    y: selectionStart.value.y,
-    width: point.x - selectionStart.value.x,
-    height: point.y - selectionStart.value.y,
-  };
+  selection.value = activeTool.value.id === "crop"
+    ? createCropRect(selectionStart.value, point, sourceImage.value!, selectedCropRatio.value)
+    : {
+        x: selectionStart.value.x,
+        y: selectionStart.value.y,
+        width: point.x - selectionStart.value.x,
+        height: point.y - selectionStart.value.y,
+      };
   drawEditor();
 };
 const finishSelection = (event: PointerEvent): void => {
+  if (cropGesture.value) {
+    moveSelection(event);
+    cropGesture.value = null;
+    drawEditor();
+    return;
+  }
   if (!selectionStart.value || !sourceImage.value) return;
   moveSelection(event);
   selectionStart.value = null;
@@ -1360,6 +1497,7 @@ const cancelToolPreview = (showNotice = false): void => {
   toolSession.value = null;
   previewImage.value = null;
   selection.value = null;
+  if (activeTool.value.id === "rotate-flip") rotationAngle.value = 0;
   void nextTick(drawEditor);
 };
 
@@ -1369,6 +1507,7 @@ const applyToolPreview = (): void => {
   toolSession.value?.preview(result);
   commitImage(toolSession.value?.apply() ?? result);
   toolSession.value = null;
+  if (activeTool.value.id === "rotate-flip") rotationAngle.value = 0;
   toolNotice.value = "修改已应用到当前画布";
 };
 
@@ -1377,6 +1516,8 @@ const resetWorkspace = (): void => {
   outputAspectRatio.value = null;
   trimWhitespace.value = false;
   selection.value = null;
+  selectedCropRatio.value = null;
+  cropGesture.value = null;
   cancelToolPreview();
   errorMessage.value = "";
   drawEditor();
@@ -1401,12 +1542,6 @@ const selectTool = (toolId: EditorToolDefinition["id"]): void => {
   errorMessage.value = "";
   if (previewImage.value) void showPreview();
   else void nextTick(drawEditor);
-};
-
-const selectCategory = (categoryId: EditorCategoryId): void => {
-  activeCategory.value = categoryId;
-  const firstTool = getCategoryTools(categoryId)[0];
-  if (firstTool) selectTool(firstTool.id);
 };
 
 const commitImage = (image: PixelImage): void => {
@@ -1454,10 +1589,36 @@ const redo = (): void => {
   if (history.value?.canRedo) restoreHistory(history.value.redo());
 };
 const applyRotate = (direction: "clockwise" | "counter-clockwise"): void => {
-  if (sourceImage.value) commitImage(rotateImage(sourceImage.value, direction));
+  if (sourceImage.value) {
+    rotationAngle.value = 0;
+    commitImage(rotateImage(sourceImage.value, direction));
+  }
+};
+const updateRotationPreview = (): void => {
+  if (!sourceImage.value) return;
+  if (rotationAngle.value === "") {
+    toolSession.value = null;
+    previewImage.value = null;
+    void nextTick(drawEditor);
+    return;
+  }
+  const angle = Math.max(-360, Math.min(360, Number(rotationAngle.value) || 0));
+  rotationAngle.value = angle;
+  if (angle === 0) {
+    toolSession.value = null;
+    previewImage.value = null;
+    void nextTick(drawEditor);
+    return;
+  }
+  toolSession.value = new CanvasToolSession(sourceImage.value);
+  previewImage.value = toolSession.value.preview(rotateImageByAngle(sourceImage.value, angle));
+  void showPreview();
 };
 const applyFlip = (direction: "horizontal" | "vertical"): void => {
-  if (sourceImage.value) commitImage(flipImage(sourceImage.value, direction));
+  if (sourceImage.value) {
+    rotationAngle.value = 0;
+    commitImage(flipImage(sourceImage.value, direction));
+  }
 };
 const applyCrop = (): void => {
   if (sourceImage.value && selection.value)
@@ -1465,36 +1626,48 @@ const applyCrop = (): void => {
 };
 const setCropRatio = (ratio: number | null): void => {
   if (!sourceImage.value) return;
+  selectedCropRatio.value = ratio;
   if (!ratio) {
-    selection.value = null;
     drawEditor();
     return;
   }
-  let width = sourceImage.value.width * 0.8;
+  const centerX = selection.value
+    ? selection.value.x + selection.value.width / 2
+    : sourceImage.value.width / 2;
+  const centerY = selection.value
+    ? selection.value.y + selection.value.height / 2
+    : sourceImage.value.height / 2;
+  let width = selection.value?.width ?? sourceImage.value.width * 0.8;
   let height = width / ratio;
-  if (height > sourceImage.value.height * 0.8) {
-    height = sourceImage.value.height * 0.8;
+  const maxWidth = 2 * Math.min(centerX, sourceImage.value.width - centerX);
+  const maxHeight = 2 * Math.min(centerY, sourceImage.value.height - centerY);
+  if (height > maxHeight) {
+    height = maxHeight;
     width = height * ratio;
   }
+  if (width > maxWidth) {
+    width = maxWidth;
+    height = width / ratio;
+  }
   selection.value = {
-    x: (sourceImage.value.width - width) / 2,
-    y: (sourceImage.value.height - height) / 2,
+    x: centerX - width / 2,
+    y: centerY - height / 2,
     width,
     height,
   };
   drawEditor();
 };
-const syncResize = (changed: "width" | "height"): void => {
-  if (!sourceImage.value || !lockRatio.value) return;
-  const ratio = sourceImage.value.width / sourceImage.value.height;
-  if (changed === "width")
-    resizeHeight.value = Math.max(1, Math.round(resizeWidth.value / ratio));
-  else resizeWidth.value = Math.max(1, Math.round(resizeHeight.value * ratio));
+const setResizeSize = (width: number, height: number): void => {
+  resizeWidth.value = width;
+  resizeHeight.value = height;
+};
+const persistResizeMode = (): void => {
+  saveResizeMode(window.localStorage, resizeMode.value);
 };
 const applyResize = (): void => {
   if (sourceImage.value)
     commitImage(
-      resizeImage(sourceImage.value, resizeWidth.value, resizeHeight.value),
+      fitImageToSize(sourceImage.value, resizeWidth.value, resizeHeight.value, resizeMode.value),
     );
 };
 const changeZoom = (delta: number): void => {
@@ -1584,6 +1757,7 @@ const onStagePointerDown = (event: PointerEvent): void => {
     isRefining.value = false;
     refineStrokePoints.value = [];
     selectionStart.value = null;
+    cropGesture.value = null;
     isPanning.value = true;
     panStart.value = {
       x: start.x,
@@ -1621,6 +1795,7 @@ const onStagePointerCancel = (): void => {
   isRefining.value = false;
   refineStrokePoints.value = [];
   selectionStart.value = null;
+  cropGesture.value = null;
   endPan();
 };
 
@@ -1858,13 +2033,15 @@ const downloadExport = (): void => {
   display: flex;
   flex-direction: column;
   padding: 10px 6px;
+  overflow-y: auto;
 }
 .rail-item {
   border: 0;
   background: transparent;
   color: #727b85;
   border-radius: 9px;
-  min-height: 68px;
+  min-height: 58px;
+  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1886,6 +2063,8 @@ const downloadExport = (): void => {
 .rail-item b {
   font-size: 11px;
   font-weight: 600;
+  line-height: 1.15;
+  text-align: center;
 }
 .rail-spacer {
   flex: 1;
@@ -2346,6 +2525,7 @@ const downloadExport = (): void => {
   font-size: 11px;
 }
 .operation-panel input[type="number"],
+.operation-panel select,
 .export-form input[type="number"],
 .export-form select {
   min-width: 0;
@@ -2356,8 +2536,23 @@ const downloadExport = (): void => {
   color: #394049;
   color-scheme: light;
 }
-.operation-panel .lock-row {
+.resize-presets {
+  display: grid;
+}
+.resize-presets button {
   display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid #dfe3e7;
+  border-radius: 7px;
+  padding: 9px;
+  background: #fff;
+  color: #535c65;
+  cursor: pointer;
+}
+.resize-presets strong {
+  color: #252a30;
+  font-size: 10px;
 }
 .ratio-grid,
 .operation-grid {
@@ -2373,6 +2568,12 @@ const downloadExport = (): void => {
   padding: 9px;
   color: #535c65;
   cursor: pointer;
+}
+.ratio-grid button.active {
+  border-color: #ff8124;
+  background: #fff5ed;
+  color: #d85d09;
+  box-shadow: inset 0 0 0 1px #ff8124;
 }
 .operation-grid button {
   display: flex;

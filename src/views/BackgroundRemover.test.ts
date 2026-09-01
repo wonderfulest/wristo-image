@@ -3,6 +3,26 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import ImageEditor from './ImageEditor.vue'
 import { CUTOUT_PREFERENCES_STORAGE_KEY } from '@/features/background-remover/cutoutPreferences'
 import { HISTORY_PANEL_WIDTH_STORAGE_KEY } from '@/features/editor/historyPanelWidth'
+import { RESIZE_MODE_STORAGE_KEY } from '@/features/editor/resizePreferences'
+
+const uploadTestImage = async (wrapper: ReturnType<typeof mount>): Promise<void> => {
+  const pixels = new Uint8ClampedArray(4 * 2 * 4).fill(255)
+  vi.stubGlobal('createImageBitmap', vi.fn(async () => ({ width: 4, height: 2, close: vi.fn() })))
+  vi.stubGlobal('ImageData', class { constructor(public data: Uint8ClampedArray, public width: number, public height: number) {} })
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+    drawImage: vi.fn(),
+    getImageData: vi.fn(() => ({ width: 4, height: 2, data: pixels })),
+    putImageData: vi.fn(),
+    save: vi.fn(), restore: vi.fn(), beginPath: vi.fn(), rect: vi.fn(), fill: vi.fn(),
+    strokeRect: vi.fn(), setLineDash: vi.fn(),
+  } as unknown as CanvasRenderingContext2D)
+  const input = wrapper.get('input[type="file"]')
+  Object.defineProperty(input.element, 'files', {
+    value: [new File(['image'], 'banner.png', { type: 'image/png' })],
+    configurable: true,
+  })
+  await input.trigger('change')
+}
 
 describe('ImageEditor', () => {
   beforeEach(() => localStorage.clear())
@@ -152,8 +172,18 @@ describe('ImageEditor', () => {
     const wrapper = mount(ImageEditor)
     const rail = wrapper.get('[data-testid="tool-rail"]')
 
-    expect(rail.text()).toContain('抠图')
-    expect(rail.text()).toContain('调整')
+    expect(rail.findAll('[data-tool-id]').map(tool => tool.attributes('data-tool-id'))).toEqual([
+      'background-remover', 'smart-erase', 'background-fill', 'restore', 'background', 'outline', 'crop', 'resize', 'rotate-flip',
+    ])
+    expect(rail.text()).toContain('快速抠图')
+    expect(rail.text()).toContain('智能擦除')
+    expect(rail.text()).toContain('背景填色')
+    expect(rail.text()).toContain('恢复')
+    expect(rail.text()).toContain('背景替换')
+    expect(rail.text()).toContain('描边')
+    expect(rail.text()).toContain('裁剪')
+    expect(rail.text()).toContain('调整尺寸')
+    expect(rail.text()).toContain('旋转翻转')
     expect(rail.text()).toContain('上传')
     expect(rail.text()).toContain('导出')
     expect(wrapper.get('[data-testid="category-tool-list"]').text()).toContain('快速抠图')
@@ -167,11 +197,130 @@ describe('ImageEditor', () => {
     expect(wrapper.get('[data-tool-id="restore"]').attributes('disabled')).toBeDefined()
     expect(wrapper.get('[data-tool-id="smart-erase"]').attributes('title')).toBe('请先上传图片')
 
-    await wrapper.get('[data-category-id="adjust"]').trigger('click')
+    await uploadTestImage(wrapper)
+    await wrapper.get('[data-testid="tool-rail"] [data-tool-id="crop"]').trigger('click')
 
     expect(wrapper.get('[data-testid="category-tool-list"]').text()).toContain('裁剪')
     expect(wrapper.get('[data-testid="category-tool-list"]').text()).toContain('调整尺寸')
     expect(wrapper.get('[data-testid="category-tool-list"]').text()).toContain('旋转翻转')
+  })
+
+  it('previews an exact correction angle and commits it only when applied', async () => {
+    const pixels = new Uint8ClampedArray(4 * 4 * 4).fill(255)
+    vi.stubGlobal('createImageBitmap', vi.fn(async () => ({ width: 4, height: 4, close: vi.fn() })))
+    vi.stubGlobal('ImageData', class { constructor(public data: Uint8ClampedArray, public width: number, public height: number) {} })
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+      drawImage: vi.fn(), getImageData: vi.fn(() => ({ width: 4, height: 4, data: pixels })), putImageData: vi.fn(),
+    } as unknown as CanvasRenderingContext2D)
+    const wrapper = mount(ImageEditor)
+    const fileInput = wrapper.get('input[type="file"]')
+    Object.defineProperty(fileInput.element, 'files', {
+      value: [new File(['image'], 'pointer.png', { type: 'image/png' })], configurable: true,
+    })
+    await fileInput.trigger('change')
+    await wrapper.get('[data-testid="tool-rail"] [data-tool-id="rotate-flip"]').trigger('click')
+
+    const angleInput = wrapper.get('[data-testid="rotation-angle"]')
+    expect(angleInput.attributes()).toMatchObject({ min: '-360', max: '360', step: '0.1' })
+    await angleInput.setValue('')
+    expect((angleInput.element as HTMLInputElement).value).toBe('')
+    await angleInput.setValue('-15')
+
+    expect(wrapper.get('.workspace-toolbar').text()).toContain('预览（尚未应用）')
+    expect(wrapper.get('canvas.result-canvas').isVisible()).toBe(true)
+    expect(wrapper.get('.history-actions button[title="撤销"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-testid="tool-preview-actions"] .primary-operation').text()).toBe('应用旋转')
+
+    await wrapper.get('[data-testid="tool-preview-actions"] .primary-operation').trigger('click')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('[data-testid="tool-preview-actions"]').exists()).toBe(false)
+    expect(wrapper.get('canvas.result-canvas').attributes('style')).toContain('display: none')
+    expect(wrapper.get('.history-actions button[title="撤销"]').attributes('disabled')).toBeUndefined()
+  })
+
+  it('offers fixed-size presets and defaults resize mode to centered cover', async () => {
+    const wrapper = mount(ImageEditor)
+    await uploadTestImage(wrapper)
+    await wrapper.get('[data-testid="tool-rail"] [data-tool-id="resize"]').trigger('click')
+
+    expect((wrapper.get('[data-testid="resize-mode"]').element as HTMLSelectElement).value).toBe('cover')
+    expect(wrapper.get('[data-testid="resize-mode"]').findAll('option').map(option => option.text())).toEqual([
+      '裁切铺满', '完整适应', '拉伸填满',
+    ])
+    await wrapper.get('[data-resize-preset="1440x720"]').trigger('click')
+    const inputs = wrapper.findAll('.operation-panel input[type="number"]')
+    expect((inputs[0]!.element as HTMLInputElement).value).toBe('1440')
+    expect((inputs[1]!.element as HTMLInputElement).value).toBe('720')
+  })
+
+  it('marks the crop ratio as selected and draws eight resize handles', async () => {
+    const arc = vi.fn()
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+      drawImage: vi.fn(),
+      getImageData: vi.fn(() => ({ width: 4, height: 2, data: new Uint8ClampedArray(4 * 2 * 4).fill(255) })),
+      putImageData: vi.fn(),
+      save: vi.fn(), restore: vi.fn(), beginPath: vi.fn(), rect: vi.fn(), fill: vi.fn(),
+      stroke: vi.fn(), strokeRect: vi.fn(), setLineDash: vi.fn(), arc,
+    } as unknown as CanvasRenderingContext2D)
+    vi.stubGlobal('createImageBitmap', vi.fn(async () => ({ width: 4, height: 2, close: vi.fn() })))
+    vi.stubGlobal('ImageData', class { constructor(public data: Uint8ClampedArray, public width: number, public height: number) {} })
+    const wrapper = mount(ImageEditor)
+    const input = wrapper.get('input[type="file"]')
+    Object.defineProperty(input.element, 'files', {
+      value: [new File(['image'], 'banner.png', { type: 'image/png' })], configurable: true,
+    })
+    await input.trigger('change')
+    await wrapper.get('[data-testid="tool-rail"] [data-tool-id="crop"]').trigger('click')
+
+    const square = wrapper.get('[data-crop-ratio="1"]')
+    await square.trigger('click')
+
+    expect(square.attributes('aria-pressed')).toBe('true')
+    expect(wrapper.get('[data-crop-ratio="free"]').attributes('aria-pressed')).toBe('false')
+    expect(arc).toHaveBeenCalledTimes(8)
+  })
+
+  it('moves an existing crop rectangle by dragging its interior', async () => {
+    const strokeRect = vi.fn()
+    const pixels = new Uint8ClampedArray(400 * 300 * 4).fill(255)
+    vi.stubGlobal('createImageBitmap', vi.fn(async () => ({ width: 400, height: 300, close: vi.fn() })))
+    vi.stubGlobal('ImageData', class { constructor(public data: Uint8ClampedArray, public width: number, public height: number) {} })
+    vi.spyOn(HTMLCanvasElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      left: 0, top: 0, right: 400, bottom: 300, width: 400, height: 300,
+      x: 0, y: 0, toJSON: () => ({}),
+    })
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+      drawImage: vi.fn(), getImageData: vi.fn(() => ({ width: 400, height: 300, data: pixels })),
+      putImageData: vi.fn(), save: vi.fn(), restore: vi.fn(), beginPath: vi.fn(), rect: vi.fn(),
+      fill: vi.fn(), stroke: vi.fn(), strokeRect, setLineDash: vi.fn(), arc: vi.fn(),
+    } as unknown as CanvasRenderingContext2D)
+    const wrapper = mount(ImageEditor)
+    const input = wrapper.get('input[type="file"]')
+    Object.defineProperty(input.element, 'files', {
+      value: [new File(['image'], 'photo.png', { type: 'image/png' })], configurable: true,
+    })
+    await input.trigger('change')
+    await wrapper.get('[data-testid="tool-rail"] [data-tool-id="crop"]').trigger('click')
+    await wrapper.findAll('.ratio-grid button').find(button => button.text() === '4:3')!.trigger('click')
+
+    const canvas = wrapper.get('.workspace-stage canvas').element
+    canvas.dispatchEvent(new MouseEvent('pointerdown', { button: 0, clientX: 200, clientY: 150 }))
+    canvas.dispatchEvent(new MouseEvent('pointermove', { button: 0, clientX: 250, clientY: 180 }))
+    canvas.dispatchEvent(new MouseEvent('pointerup', { button: 0, clientX: 250, clientY: 180 }))
+
+    expect(strokeRect).toHaveBeenLastCalledWith(80, 60, 320, 240)
+  })
+
+  it('restores and saves the selected resize mode', async () => {
+    localStorage.setItem(RESIZE_MODE_STORAGE_KEY, 'contain')
+    const wrapper = mount(ImageEditor)
+    await uploadTestImage(wrapper)
+    await wrapper.get('[data-testid="tool-rail"] [data-tool-id="resize"]').trigger('click')
+
+    const mode = wrapper.get('[data-testid="resize-mode"]')
+    expect((mode.element as HTMLSelectElement).value).toBe('contain')
+    await mode.setValue('stretch')
+    expect(localStorage.getItem(RESIZE_MODE_STORAGE_KEY)).toBe('stretch')
   })
 
   it('opens every cutout tool from the current canvas and cancels an unapplied preview on switch', async () => {

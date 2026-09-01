@@ -8,6 +8,7 @@
       <nav aria-label="主导航">
         <RouterLink to="/">工具</RouterLink>
         <RouterLink to="/tools/background-remover">快速抠图</RouterLink>
+        <RouterLink to="/tools/image-compressor">图片压缩</RouterLink>
       </nav>
       <span class="local-chip"><span /> 本地处理</span>
     </header>

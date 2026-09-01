@@ -28,7 +28,7 @@ export const editorTools: readonly EditorToolDefinition[] = [
   { id: 'background', categoryId: 'cutout', title: '背景替换', description: '为当前画布设置纯色、渐变或自定义图片背景。', icon: '▧' },
   { id: 'outline', categoryId: 'cutout', title: '描边', description: '为当前画布中的透明主体增加可调外描边。', icon: '◎' },
   { id: 'crop', categoryId: 'adjust', title: '裁剪', description: '自由裁剪，或使用常用固定比例。', icon: '⌗' },
-  { id: 'resize', categoryId: 'adjust', title: '调整尺寸', description: '按像素调整图片尺寸并保持比例。', icon: '↔' },
+  { id: 'resize', categoryId: 'adjust', title: '调整尺寸', description: '一键调整到固定尺寸，并选择裁切、适应或拉伸模式。', icon: '↔' },
   { id: 'rotate-flip', categoryId: 'adjust', title: '旋转翻转', description: '旋转图片，或沿水平和垂直方向翻转。', icon: '↻' },
 ]
 

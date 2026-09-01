@@ -14,6 +14,11 @@ export default createRouter({
       path: '/tools/background-remover',
       redirect: { path: '/editor', query: { tool: 'background-remover' } },
     },
+    {
+      path: '/tools/image-compressor',
+      name: 'image-compressor',
+      component: () => import('@/views/ImageCompressor.vue'),
+    },
   ],
   scrollBehavior: () => ({ top: 0 }),
 })
