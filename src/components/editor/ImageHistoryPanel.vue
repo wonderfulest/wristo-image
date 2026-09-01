@@ -34,8 +34,20 @@
           <small>{{ image.width }} × {{ image.height }}</small>
         </span>
         <button
+          data-testid="download-history-image"
+          class="history-image-action download-history-image"
+          type="button"
+          :aria-label="`下载 ${image.name}`"
+          :title="`下载 ${image.name}`"
+          @click.stop="emit('download', image.id)"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 3v11m0 0 4-4m-4 4-4-4M5 18v2h14v-2" />
+          </svg>
+        </button>
+        <button
           data-testid="delete-history-image"
-          class="delete-history-image"
+          class="history-image-action delete-history-image"
           type="button"
           :aria-label="`删除 ${image.name}`"
           @click.stop="requestDelete(image)"
@@ -77,6 +89,7 @@ export type ImageHistoryPanelItem = {
 
 const emit = defineEmits<{
   select: [id: string]
+  download: [id: string]
   delete: [id: string]
   clear: []
 }>()
@@ -227,10 +240,9 @@ const confirmAction = (): void => {
   color: #9299a1;
   font-size: 8px;
 }
-.delete-history-image {
+.history-image-action {
   position: absolute;
   top: 7px;
-  right: 7px;
   width: 20px;
   height: 20px;
   border: 0;
@@ -240,8 +252,26 @@ const confirmAction = (): void => {
   opacity: 0;
   cursor: pointer;
 }
-.history-image:hover .delete-history-image,
-.delete-history-image:focus-visible {
+.download-history-image {
+  right: 31px;
+  display: grid;
+  place-items: center;
+  padding: 4px;
+}
+.download-history-image svg {
+  width: 12px;
+  height: 12px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.delete-history-image {
+  right: 7px;
+}
+.history-image:hover .history-image-action,
+.history-image-action:focus-visible {
   opacity: 1;
 }
 .history-empty {

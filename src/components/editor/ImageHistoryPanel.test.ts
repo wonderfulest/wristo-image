@@ -41,6 +41,15 @@ describe('ImageHistoryPanel', () => {
     wrapper.unmount()
   })
 
+  it('emits download without selecting the history image', async () => {
+    const wrapper = mount(ImageHistoryPanel, { props: { images } })
+
+    await wrapper.findAll('[data-testid="download-history-image"]')[0]!.trigger('click')
+
+    expect(wrapper.emitted('download')?.[0]).toEqual(['new'])
+    expect(wrapper.emitted('select')).toBeUndefined()
+  })
+
   it('waits for confirmation before clearing every history image', async () => {
     const wrapper = mount(ImageHistoryPanel, { props: { images } })
 

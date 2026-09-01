@@ -63,7 +63,10 @@
       </button>
     </header>
 
-    <div class="editor-body">
+    <div
+      class="editor-body"
+      :style="{ '--history-panel-width': `${historyPanelWidth}px` }"
+    >
       <nav data-testid="tool-rail" class="tool-rail" aria-label="编辑工具">
         <button
           v-for="category in editorCategories"
@@ -549,12 +552,23 @@
           ><span>滚轮缩放 · 长按或中键拖动画布</span>
         </footer>
       </section>
-      <ImageHistoryPanel
-        :images="localHistoryImages"
-        @select="loadHistoryImage"
-        @delete="deleteHistoryImage"
-        @clear="clearImageHistory"
-      />
+      <div class="history-panel-shell">
+        <button
+          data-testid="history-panel-resize-handle"
+          class="history-panel-resize-handle"
+          type="button"
+          aria-label="调整历史图片区宽度"
+          title="拖动调整历史图片区宽度"
+          @pointerdown="startHistoryPanelResize"
+        />
+        <ImageHistoryPanel
+          :images="localHistoryImages"
+          @select="loadHistoryImage"
+          @download="downloadHistoryImage"
+          @delete="deleteHistoryImage"
+          @clear="clearImageHistory"
+        />
+      </div>
     </div>
 
     <AppModal
@@ -644,6 +658,12 @@ import {
 } from "@/features/editor/imageOperations";
 import { consumeWheelZoom } from "@/features/editor/zoomControl";
 import { resolveBrushCursor } from "@/features/editor/brushCursor";
+import { downloadBlob } from "@/features/editor/downloadBlob";
+import {
+  HISTORY_PANEL_WIDTH_STORAGE_KEY,
+  loadHistoryPanelWidth,
+  normalizeHistoryPanelWidth,
+} from "@/features/editor/historyPanelWidth";
 import {
   createCanvasHistoryName,
   encodePixelImageAsPng,
@@ -732,6 +752,30 @@ const exportHeight = ref(1);
 const isSavingCanvas = ref(false);
 const localHistoryEntries = ref<LocalImageHistoryEntry[]>([]);
 const localHistoryImages = ref<ImageHistoryPanelItem[]>([]);
+const historyPanelWidth = ref(loadHistoryPanelWidth(window.localStorage));
+let historyPanelResizeStart: { clientX: number; width: number } | null = null;
+
+const moveHistoryPanelResize = (event: PointerEvent): void => {
+  if (!historyPanelResizeStart) return;
+  historyPanelWidth.value = normalizeHistoryPanelWidth(
+    historyPanelResizeStart.width + historyPanelResizeStart.clientX - event.clientX,
+  );
+};
+const finishHistoryPanelResize = (): void => {
+  if (!historyPanelResizeStart) return;
+  historyPanelResizeStart = null;
+  window.localStorage.setItem(HISTORY_PANEL_WIDTH_STORAGE_KEY, String(historyPanelWidth.value));
+  window.removeEventListener("pointermove", moveHistoryPanelResize);
+  window.removeEventListener("pointerup", finishHistoryPanelResize);
+  window.removeEventListener("pointercancel", finishHistoryPanelResize);
+};
+const startHistoryPanelResize = (event: PointerEvent): void => {
+  event.preventDefault();
+  historyPanelResizeStart = { clientX: event.clientX, width: historyPanelWidth.value };
+  window.addEventListener("pointermove", moveHistoryPanelResize);
+  window.addEventListener("pointerup", finishHistoryPanelResize);
+  window.addEventListener("pointercancel", finishHistoryPanelResize);
+};
 const isBrushTool = (toolId: EditorToolDefinition["id"]): boolean =>
   toolId === "smart-erase" || toolId === "restore";
 const brushMode = computed<RefineBrushMode>(() =>
@@ -929,6 +973,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   revokeHistoryPreviewUrls();
   if (longPressPanTimer) clearTimeout(longPressPanTimer);
+  finishHistoryPanelResize();
 });
 
 const showPreview = async (): Promise<void> => {
@@ -1050,6 +1095,12 @@ const loadHistoryImage = async (id: string): Promise<void> => {
   } catch {
     errorMessage.value = "无法读取这张历史图片，可能已被浏览器清理。";
   }
+};
+
+const downloadHistoryImage = (id: string): void => {
+  const entry = localHistoryEntries.value.find((image) => image.id === id);
+  if (!entry) return;
+  downloadBlob(entry.blob, entry.name);
 };
 
 const deleteHistoryImage = async (id: string): Promise<void> => {
@@ -1734,7 +1785,43 @@ const downloadExport = (): void => {
 .editor-body {
   min-height: 0;
   display: grid;
-  grid-template-columns: 76px 304px minmax(0, 1fr) 190px;
+  grid-template-columns: 76px 304px minmax(0, 1fr) var(--history-panel-width);
+}
+.history-panel-shell {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+}
+.history-panel-shell .image-history-panel {
+  height: 100%;
+  box-sizing: border-box;
+}
+.history-panel-resize-handle {
+  position: absolute;
+  z-index: 5;
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  width: 8px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: col-resize;
+  touch-action: none;
+}
+.history-panel-resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 2px;
+  background: transparent;
+  transition: background 0.15s ease;
+}
+.history-panel-resize-handle:hover::after,
+.history-panel-resize-handle:focus-visible::after {
+  background: #ff9d59;
 }
 .tool-rail {
   background: #fff;
@@ -2502,7 +2589,7 @@ const downloadExport = (): void => {
 }
 @media (max-width: 850px) {
   .editor-body {
-    grid-template-columns: 64px 250px minmax(0, 1fr) 150px;
+    grid-template-columns: 64px 250px minmax(0, 1fr) var(--history-panel-width);
   }
   .tool-panel {
     padding: 17px 13px;
@@ -2523,7 +2610,7 @@ const downloadExport = (): void => {
   .editor-body {
     grid-template-columns: 58px minmax(0, 1fr);
   }
-  .image-history-panel {
+  .history-panel-shell {
     display: none;
   }
   .tool-panel {

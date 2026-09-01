@@ -2,6 +2,7 @@ import { mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import ImageEditor from './ImageEditor.vue'
 import { CUTOUT_PREFERENCES_STORAGE_KEY } from '@/features/background-remover/cutoutPreferences'
+import { HISTORY_PANEL_WIDTH_STORAGE_KEY } from '@/features/editor/historyPanelWidth'
 
 describe('ImageEditor', () => {
   beforeEach(() => localStorage.clear())
@@ -19,6 +20,32 @@ describe('ImageEditor', () => {
     expect(wrapper.text()).toContain('图片仅在当前浏览器中处理')
     expect(wrapper.get('[data-testid="image-history-panel"]').text()).toContain('历史图片')
     expect(wrapper.get('[data-testid="image-history-panel"]').text()).toContain('仅保存在当前浏览器')
+  })
+
+  it('resizes the history panel by dragging its left divider and saves the result', async () => {
+    const wrapper = mount(ImageEditor)
+    const editorBody = wrapper.get('.editor-body')
+    const resizeHandle = wrapper.get('[data-testid="history-panel-resize-handle"]')
+
+    resizeHandle.element.dispatchEvent(new MouseEvent('pointerdown', {
+      bubbles: true,
+      clientX: 500,
+    }))
+    window.dispatchEvent(new MouseEvent('pointermove', { clientX: 430 }))
+    await wrapper.vm.$nextTick()
+
+    expect(editorBody.attributes('style')).toContain('--history-panel-width: 260px')
+
+    window.dispatchEvent(new MouseEvent('pointerup', { clientX: 430 }))
+    expect(localStorage.getItem(HISTORY_PANEL_WIDTH_STORAGE_KEY)).toBe('260')
+  })
+
+  it('restores the saved history panel width when the editor opens', () => {
+    localStorage.setItem(HISTORY_PANEL_WIDTH_STORAGE_KEY, '312')
+
+    const wrapper = mount(ImageEditor)
+
+    expect(wrapper.get('.editor-body').attributes('style')).toContain('--history-panel-width: 312px')
   })
 
   it('shows a specific error when the chosen format is unsupported', async () => {
