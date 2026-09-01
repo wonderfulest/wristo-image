@@ -80,6 +80,26 @@ describe('removeConnectedBackground', () => {
     expect(alphaAt(result, 2, 0)).toBe(255)
     expect(alphaAt(result, 0, 0)).toBe(0)
   })
+
+  it('removes isolated speckles while preserving a detached icon detail', () => {
+    const black = [0, 0, 0, 255] as const
+    const white = [255, 255, 255, 255] as const
+    const red = [240, 20, 60, 255] as const
+    const source = pixelImage([
+      [black, black, black, black, black, black, black, black],
+      [black, white, white, white, white, black, red, black],
+      [black, white, white, white, white, black, black, black],
+      [black, white, white, white, white, black, red, black],
+      [black, white, white, white, white, black, red, black],
+      [black, black, black, black, black, black, black, black],
+    ].map(row => row.map(pixel => [...pixel] as [number, number, number, number])))
+
+    const result = removeConnectedBackground(source, { x: 0, y: 0, width: 8, height: 6 }, 12)
+
+    expect(alphaAt(result, 6, 1)).toBe(0)
+    expect(alphaAt(result, 6, 3)).toBe(255)
+    expect(alphaAt(result, 6, 4)).toBe(255)
+  })
 })
 
 describe('fillSelectionWithColor', () => {

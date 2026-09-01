@@ -103,6 +103,53 @@ const matchesBackground = (image: PixelImage, index: number, background: Rgb, to
   return Math.sqrt(red * red + green * green + blue * blue) <= tolerance
 }
 
+const removeSmallForegroundComponents = (image: PixelImage): void => {
+  const pixelCount = image.width * image.height
+  const labels = new Int32Array(pixelCount)
+  const queue = new Int32Array(pixelCount)
+  const componentSizes = [0]
+
+  for (let start = 0; start < pixelCount; start += 1) {
+    if (labels[start] || (image.data[start * 4 + 3] ?? 0) === 0) continue
+
+    const label = componentSizes.length
+    let head = 0
+    let tail = 1
+    let size = 0
+    queue[0] = start
+    labels[start] = label
+
+    while (head < tail) {
+      const index = queue[head] ?? 0
+      head += 1
+      size += 1
+      const x = index % image.width
+      const y = Math.floor(index / image.width)
+
+      for (let offsetY = -1; offsetY <= 1; offsetY += 1) {
+        for (let offsetX = -1; offsetX <= 1; offsetX += 1) {
+          if ((!offsetX && !offsetY) || x + offsetX < 0 || x + offsetX >= image.width || y + offsetY < 0 || y + offsetY >= image.height) continue
+          const neighbor = (y + offsetY) * image.width + x + offsetX
+          if (labels[neighbor] || (image.data[neighbor * 4 + 3] ?? 0) === 0) continue
+          labels[neighbor] = label
+          queue[tail] = neighbor
+          tail += 1
+        }
+      }
+    }
+
+    componentSizes.push(size)
+  }
+
+  let largestSize = 0
+  for (const size of componentSizes) largestSize = Math.max(largestSize, size)
+  const minimumSize = Math.max(2, Math.ceil(largestSize * 0.01))
+  for (let index = 0; index < pixelCount; index += 1) {
+    const label = labels[index] ?? 0
+    if (label && (componentSizes[label] ?? 0) < minimumSize) image.data[index * 4 + 3] = 0
+  }
+}
+
 export const removeConnectedBackground = (
   source: PixelImage,
   selection: SelectionRect,
@@ -122,6 +169,7 @@ export const removeConnectedBackground = (
       result.data[index * 4 + 3] = 0
     }
   }
+  removeSmallForegroundComponents(result)
 
   return result
 }
