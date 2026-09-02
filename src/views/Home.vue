@@ -9,7 +9,7 @@
           <RouterLink class="hero-action" to="/editor">开始编辑图片 <span>↗</span></RouterLink>
           <a class="tool-jump" href="#all-tools">查看全部工具 <span>↓</span></a>
         </div>
-        <div class="privacy-line"><span /> 无需上传 · 无需登录 · 图片留在本地</div>
+        <div class="privacy-line"><span /> 常规工具本地处理 · 无需登录 · AI 去水印按需上传</div>
       </div>
 
       <div class="editor-preview" aria-hidden="true">
@@ -33,7 +33,7 @@
 
     <section id="all-tools" class="tool-section" aria-labelledby="tool-title">
       <div class="section-heading">
-        <div><span>TOOLS / 10</span><h2 id="tool-title">你需要的，都在这里</h2></div>
+        <div><span>TOOLS / 11</span><h2 id="tool-title">你需要的，都在这里</h2></div>
         <p>从简单调整到背景处理，点开就能使用。</p>
       </div>
       <div class="tool-grid">
@@ -55,7 +55,7 @@
     <section class="local-section" aria-label="本地处理说明">
       <span class="local-number">02</span>
       <div><p class="local-kicker">LOCAL FIRST</p><h2>图片不必绕远路。</h2></div>
-      <p>编辑与导出直接在浏览器中完成。没有上传等待，也不会把你的原图发送到服务器。</p>
+      <p>常规编辑与导出直接在浏览器中完成；仅在使用 AI 去水印时，图片会临时发送到 Wristo 服务端处理。</p>
       <RouterLink to="/editor">选择一张图片 <span>→</span></RouterLink>
     </section>
   </main>

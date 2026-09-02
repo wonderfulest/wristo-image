@@ -16,15 +16,16 @@ describe('Home', () => {
     expect(primaryAction?.props('to')).toBe('/editor')
   })
 
-  it('shows all ten editing tools as direct entry points', () => {
+  it('shows all eleven editing tools as direct entry points', () => {
     const wrapper = mount(Home, {
       global: { stubs: { RouterLink: RouterLinkStub } },
     })
 
     const toolLinks = wrapper.findAll('[data-testid="home-tool-link"]')
-    expect(toolLinks).toHaveLength(10)
+    expect(toolLinks).toHaveLength(11)
     expect(toolLinks.map(link => link.text())).toEqual(expect.arrayContaining([
       expect.stringContaining('快速抠图'),
+      expect.stringContaining('AI 去水印'),
       expect.stringContaining('智能擦除'),
       expect.stringContaining('背景填色'),
       expect.stringContaining('恢复'),

@@ -11,13 +11,13 @@ describe('editor tool registry', () => {
 
   it('registers every currently supported tool', () => {
     expect(editorTools.map(tool => tool.id)).toEqual([
-      'background-remover', 'smart-erase', 'background-fill', 'restore', 'background', 'outline', 'crop', 'resize', 'rotate-flip',
+      'background-remover', 'ai-watermark-remover', 'smart-erase', 'background-fill', 'restore', 'background', 'outline', 'crop', 'resize', 'rotate-flip',
     ])
   })
 
   it('groups tools into cutout and adjustment categories', () => {
     expect(editorCategories.map(category => category.id)).toEqual(['cutout', 'adjust'])
-    expect(getCategoryTools('cutout').map(tool => tool.title)).toEqual(['快速抠图', '智能擦除', '背景填色', '恢复', '背景替换', '描边'])
+    expect(getCategoryTools('cutout').map(tool => tool.title)).toEqual(['快速抠图', 'AI 去水印', '智能擦除', '背景填色', '恢复', '背景替换', '描边'])
     expect(getCategoryTools('adjust').map(tool => tool.title)).toEqual(['裁剪', '调整尺寸', '旋转翻转'])
   })
 

@@ -86,6 +86,19 @@ describe('ImageEditor', () => {
     expect(wrapper.get('[data-testid="reset-button"]').attributes('disabled')).toBeDefined()
   })
 
+  it('offers automatic AI removal and editable mask controls', async () => {
+    const wrapper = mount(ImageEditor)
+    await uploadTestImage(wrapper)
+
+    await wrapper.get('[data-tool-id="ai-watermark-remover"]').trigger('click')
+
+    expect(wrapper.get('[data-testid="watermark-auto-button"]').text()).toContain('自动识别并去除')
+    expect(wrapper.get('[data-testid="watermark-mask-mode-add"]').text()).toContain('画笔增加')
+    expect(wrapper.get('[data-testid="watermark-mask-mode-erase"]').text()).toContain('橡皮减少')
+    expect(wrapper.get('[data-testid="watermark-mask-submit"]').text()).toContain('按调整范围重新修复')
+    expect(wrapper.text()).toContain('图片会上传至 Wristo 服务端并由阿里云百炼处理')
+  })
+
   it('shows cutout output ratio and whitespace controls', () => {
     const wrapper = mount(ImageEditor)
 
@@ -173,9 +186,10 @@ describe('ImageEditor', () => {
     const rail = wrapper.get('[data-testid="tool-rail"]')
 
     expect(rail.findAll('[data-tool-id]').map(tool => tool.attributes('data-tool-id'))).toEqual([
-      'background-remover', 'smart-erase', 'background-fill', 'restore', 'background', 'outline', 'crop', 'resize', 'rotate-flip',
+      'background-remover', 'ai-watermark-remover', 'smart-erase', 'background-fill', 'restore', 'background', 'outline', 'crop', 'resize', 'rotate-flip',
     ])
     expect(rail.text()).toContain('快速抠图')
+    expect(rail.text()).toContain('AI 去水印')
     expect(rail.text()).toContain('智能擦除')
     expect(rail.text()).toContain('背景填色')
     expect(rail.text()).toContain('恢复')

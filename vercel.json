@@ -5,6 +5,10 @@
   "outputDirectory": "dist",
   "rewrites": [
     {
+      "source": "/api/image-tools/:path*",
+      "destination": "https://api.wristo.cn/api/public/image-tools/:path*"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }

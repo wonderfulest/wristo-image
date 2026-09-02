@@ -42,7 +42,7 @@
           ↷
         </button>
       </div>
-      <span class="topbar-local"><i /> 本地处理</span>
+      <span class="topbar-local"><i /> {{ activeTool.id === 'ai-watermark-remover' ? 'AI 安全处理' : '本地处理' }}</span>
       <button
         data-testid="save-canvas-button"
         class="topbar-save"
@@ -89,7 +89,7 @@
           <span class="rail-icon">↓</span><b>导出</b>
         </button>
         <div class="rail-spacer" />
-        <span class="privacy-dot" title="图片不会上传服务器" />
+        <span class="privacy-dot" :title="activeTool.id === 'ai-watermark-remover' ? '仅使用 AI 工具时上传' : '图片不会上传服务器'" />
       </nav>
 
       <aside data-testid="tool-panel" class="tool-panel">
@@ -138,6 +138,38 @@
           </div>
           <button type="button" @click="fileInput?.click()">更换</button>
         </div>
+
+        <section
+          v-if="activeTool.id === 'ai-watermark-remover'"
+          class="panel-section operation-panel watermark-panel"
+        >
+          <div class="section-title"><span>AI 修复</span></div>
+          <button
+            data-testid="watermark-auto-button"
+            class="primary-operation"
+            type="button"
+            :disabled="watermarkBusy || !sourceImage"
+            @click="runAutomaticWatermarkRemoval"
+          >{{ watermarkBusy ? watermarkProgressLabel : '自动识别并去除' }}</button>
+          <div class="watermark-mask-modes">
+            <button type="button" :class="{ active: watermarkMaskMode === 'rectangle' }" @click="watermarkMaskMode = 'rectangle'">矩形框选</button>
+            <button data-testid="watermark-mask-mode-add" type="button" :class="{ active: watermarkMaskMode === 'add' }" @click="watermarkMaskMode = 'add'">画笔增加</button>
+            <button data-testid="watermark-mask-mode-erase" type="button" :class="{ active: watermarkMaskMode === 'erase' }" @click="watermarkMaskMode = 'erase'">橡皮减少</button>
+          </div>
+          <label>画笔大小
+            <input v-model.number="watermarkBrushSize" type="range" min="4" max="160" />
+            <output>{{ watermarkBrushSize }} px</output>
+          </label>
+          <p>自动处理后若仍有残留，可框选或涂抹水印区域；橙色覆盖层表示将由 AI 重建的范围。</p>
+          <button
+            data-testid="watermark-mask-submit"
+            class="primary-operation"
+            type="button"
+            :disabled="watermarkBusy || !watermarkMaskHasPixels"
+            @click="runMaskedWatermarkRemoval"
+          >按调整范围重新修复</button>
+          <small class="watermark-upload-notice">仅处理你拥有或已获授权的图片。图片会上传至 Wristo 服务端并由阿里云百炼处理。</small>
+        </section>
 
         <section
           v-if="activeTool.id === 'background-remover'"
@@ -467,13 +499,14 @@
         >
           重置参数
         </button>
-        <div class="local-note">
+        <div v-if="activeTool.id !== 'ai-watermark-remover'" class="local-note">
           <i />
           <span
             ><strong>图片仅在当前浏览器中处理</strong
             ><br />不会上传服务器，历史仅保存在本机浏览器。</span
           >
         </div>
+        <div v-else class="local-note ai-note"><i /><span><strong>AI 处理会临时上传图片</strong><br />处理完成后不在 Wristo 数据库或磁盘长期保存。</span></div>
       </aside>
 
       <section class="editor-workspace">
@@ -749,6 +782,17 @@ import ImageHistoryPanel, {
   type ImageHistoryPanelItem,
 } from "@/components/editor/ImageHistoryPanel.vue";
 import AppModal from "@/components/ui/AppModal.vue";
+import {
+  createWatermarkRemovalTask,
+  waitForWatermarkRemoval,
+} from "@/features/watermark-remover/watermarkRemovalApi";
+import {
+  applyMaskBrush,
+  applyMaskRectangle,
+  createWatermarkMask,
+  maskToRgba,
+  type WatermarkMask,
+} from "@/features/watermark-remover/watermarkMask";
 
 const savedCutoutPreferences = loadCutoutPreferences(window.localStorage);
 const localImageHistoryRepository = createLocalImageHistoryRepository();
@@ -772,6 +816,14 @@ const fileName = ref("");
 const sourceMimeType = ref("");
 const errorMessage = ref("");
 const toolNotice = ref("");
+const watermarkBusy = ref(false);
+const watermarkProgressLabel = ref("正在上传…");
+const watermarkMaskMode = ref<"rectangle" | "add" | "erase">("rectangle");
+const watermarkBrushSize = ref(36);
+const watermarkMask = ref<WatermarkMask | null>(null);
+const watermarkOriginalImage = ref<PixelImage | null>(null);
+const watermarkMaskHasPixels = computed(() => watermarkMask.value?.data.some(value => value > 0) ?? false);
+const watermarkPainting = ref(false);
 const tolerance = ref(savedCutoutPreferences.tolerance);
 const outputAspectRatio = ref<number | null>(savedCutoutPreferences.aspectRatio);
 const trimWhitespace = ref(savedCutoutPreferences.trimWhitespace);
@@ -925,6 +977,12 @@ const workspaceMessage = computed(() =>
           ? backgroundFillMode.value === "content"
             ? "拖动鼠标框选要移除并自动补齐的区域"
             : "拖动鼠标框选要填色的背景区域"
+        : activeTool.value.id === "ai-watermark-remover"
+          ? watermarkMaskMode.value === "rectangle"
+            ? "框选仍需修复的水印区域"
+            : watermarkMaskMode.value === "add"
+              ? "涂抹增加 AI 修复范围"
+              : "涂抹减少 AI 修复范围"
         : activeTool.value.id === "background-remover"
           ? "拖动鼠标框选要保留的图标"
           : "图片预览",
@@ -999,6 +1057,25 @@ const drawEditor = (): void => {
   const image = sourceImage.value;
   if (!canvas || !image) return;
   drawPixelImage(canvas, image);
+  if (activeTool.value.id === "ai-watermark-remover" && watermarkMask.value) {
+    const overlay = document.createElement("canvas");
+    overlay.width = watermarkMask.value.width;
+    overlay.height = watermarkMask.value.height;
+    const overlayContext = overlay.getContext("2d");
+    if (overlayContext) {
+      const rgba = new Uint8ClampedArray(watermarkMask.value.width * watermarkMask.value.height * 4);
+      watermarkMask.value.data.forEach((value, index) => {
+        if (!value) return;
+        const offset = index * 4;
+        rgba[offset] = 255;
+        rgba[offset + 1] = 104;
+        rgba[offset + 2] = 24;
+        rgba[offset + 3] = 105;
+      });
+      overlayContext.putImageData(new ImageData(rgba, overlay.width, overlay.height), 0, 0);
+      canvas.getContext("2d")?.drawImage(overlay, 0, 0);
+    }
+  }
   const current =
     selection.value &&
     normalizeSelection(selection.value, image.width, image.height);
@@ -1295,8 +1372,17 @@ const updateCropCursor = (event: PointerEvent): void => {
 
 const startSelection = (event: PointerEvent): void => {
   if (event.button !== 0) return;
+  if (activeTool.value.id === "ai-watermark-remover" && watermarkMaskMode.value !== "rectangle") {
+    const point = pointInImage(event);
+    if (!point || !watermarkMask.value) return;
+    watermarkPainting.value = true;
+    applyMaskBrush(watermarkMask.value, point, watermarkBrushSize.value, watermarkMaskMode.value === "add");
+    editorCanvas.value?.setPointerCapture(event.pointerId);
+    drawEditor();
+    return;
+  }
   if (
-    !["background-remover", "background-fill", "crop"].includes(activeTool.value.id) ||
+    !["background-remover", "background-fill", "crop", "ai-watermark-remover"].includes(activeTool.value.id) ||
     previewImage.value
   )
     return;
@@ -1318,6 +1404,13 @@ const startSelection = (event: PointerEvent): void => {
   editorCanvas.value?.setPointerCapture(event.pointerId);
 };
 const moveSelection = (event: PointerEvent): void => {
+  if (watermarkPainting.value && watermarkMask.value) {
+    const point = pointInImage(event);
+    if (!point) return;
+    applyMaskBrush(watermarkMask.value, point, watermarkBrushSize.value, watermarkMaskMode.value === "add");
+    drawEditor();
+    return;
+  }
   if (cropGesture.value && sourceImage.value) {
     const point = pointInImage(event);
     if (!point) return;
@@ -1352,6 +1445,11 @@ const moveSelection = (event: PointerEvent): void => {
   drawEditor();
 };
 const finishSelection = (event: PointerEvent): void => {
+  if (watermarkPainting.value) {
+    moveSelection(event);
+    watermarkPainting.value = false;
+    return;
+  }
   if (cropGesture.value) {
     moveSelection(event);
     cropGesture.value = null;
@@ -1376,6 +1474,10 @@ const finishSelection = (event: PointerEvent): void => {
     return;
   }
   selection.value = normalized;
+  if (activeTool.value.id === "ai-watermark-remover" && watermarkMask.value) {
+    applyMaskRectangle(watermarkMask.value, normalized, true);
+    selection.value = null;
+  }
   if (activeTool.value.id === "background-remover") processSelection();
   if (activeTool.value.id === "background-fill") applyBackgroundFill();
   drawEditor();
@@ -1511,12 +1613,69 @@ const applyToolPreview = (): void => {
   toolNotice.value = "修改已应用到当前画布";
 };
 
+const encodeWatermarkMask = (mask: WatermarkMask): Promise<Blob> => {
+  const canvas = document.createElement("canvas");
+  canvas.width = mask.width;
+  canvas.height = mask.height;
+  const context = canvas.getContext("2d");
+  if (!context) return Promise.reject(new Error("当前浏览器无法创建蒙版画布。"));
+  context.putImageData(new ImageData(new Uint8ClampedArray(maskToRgba(mask)), mask.width, mask.height), 0, 0);
+  return new Promise((resolve, reject) => canvas.toBlob(
+    blob => blob ? resolve(blob) : reject(new Error("无法生成水印蒙版。")),
+    "image/png",
+  ));
+};
+
+const applyWatermarkResult = async (resultUrl: string): Promise<void> => {
+  const response = await fetch(resultUrl, { cache: "no-store" });
+  if (!response.ok) throw new Error("AI 修复结果暂时无法下载");
+  const bitmap = await createImageBitmap(await response.blob());
+  const result = pixelImageFromBitmap(bitmap);
+  bitmap.close();
+  commitImage(result);
+  watermarkMask.value = createWatermarkMask(result.width, result.height);
+  toolNotice.value = "AI 去水印结果已应用，可撤销或继续调整范围";
+};
+
+const runWatermarkRemoval = async (mode: "automatic" | "mask"): Promise<void> => {
+  const original = mode === "automatic" ? sourceImage.value : watermarkOriginalImage.value;
+  if (!original || (mode === "mask" && !watermarkMask.value)) return;
+  watermarkBusy.value = true;
+  errorMessage.value = "";
+  watermarkProgressLabel.value = "正在上传…";
+  try {
+    if (mode === "automatic") {
+      watermarkOriginalImage.value = original;
+      watermarkMask.value = createWatermarkMask(original.width, original.height);
+    }
+    const image = await encodePixelImageAsPng(original);
+    const mask = mode === "mask" ? await encodeWatermarkMask(watermarkMask.value!) : undefined;
+    const task = await createWatermarkRemovalTask({ image, mask, mode });
+    watermarkProgressLabel.value = "AI 正在识别与修复…";
+    const status = await waitForWatermarkRemoval(task.taskToken);
+    if (!status.resultUrl) throw new Error("AI 去水印任务未返回结果");
+    watermarkProgressLabel.value = "正在获取结果…";
+    await applyWatermarkResult(status.resultUrl);
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : "AI 去水印处理失败";
+  } finally {
+    watermarkBusy.value = false;
+  }
+};
+
+const runAutomaticWatermarkRemoval = (): void => { void runWatermarkRemoval("automatic"); };
+const runMaskedWatermarkRemoval = (): void => { void runWatermarkRemoval("mask"); };
+
 const resetWorkspace = (): void => {
   tolerance.value = 28;
   outputAspectRatio.value = null;
   trimWhitespace.value = false;
   selection.value = null;
   selectedCropRatio.value = null;
+  watermarkMask.value = sourceImage.value
+    ? createWatermarkMask(sourceImage.value.width, sourceImage.value.height)
+    : null;
+  watermarkOriginalImage.value = sourceImage.value;
   cropGesture.value = null;
   cancelToolPreview();
   errorMessage.value = "";
@@ -1534,6 +1693,11 @@ const selectTool = (toolId: EditorToolDefinition["id"]): void => {
   cancelToolPreview(true);
   activeTool.value = tool;
   activeCategory.value = tool.categoryId;
+  if (tool.id === "ai-watermark-remover" && sourceImage.value) {
+    watermarkOriginalImage.value = sourceImage.value;
+    watermarkMask.value = createWatermarkMask(sourceImage.value.width, sourceImage.value.height);
+    watermarkMaskMode.value = "rectangle";
+  }
   if (["smart-erase", "restore", "background", "outline"].includes(tool.id)) {
     toolSession.value = new CanvasToolSession(sourceImage.value);
     previewImage.value = toolSession.value.rendered;
