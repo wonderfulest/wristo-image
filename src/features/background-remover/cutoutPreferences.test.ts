@@ -23,6 +23,17 @@ describe('cutoutPreferences', () => {
     })
   })
 
+  it('restores a tolerance across the full RGB color-distance range', () => {
+    localStorage.setItem(CUTOUT_PREFERENCES_STORAGE_KEY, JSON.stringify({
+      version: 1,
+      aspectRatio: null,
+      trimWhitespace: false,
+      tolerance: 300,
+    }))
+
+    expect(loadCutoutPreferences(localStorage).tolerance).toBe(300)
+  })
+
   it('falls back safely when persisted data is invalid', () => {
     localStorage.setItem(CUTOUT_PREFERENCES_STORAGE_KEY, '{broken')
 

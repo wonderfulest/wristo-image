@@ -7,6 +7,7 @@
       </RouterLink>
       <nav aria-label="主导航">
         <RouterLink to="/editor">图片编辑器</RouterLink>
+        <RouterLink to="/font-editor">字体编辑器</RouterLink>
         <RouterLink to="/#all-tools">全部工具</RouterLink>
         <RouterLink to="/editor?tool=image-compressor">图片压缩</RouterLink>
       </nav>

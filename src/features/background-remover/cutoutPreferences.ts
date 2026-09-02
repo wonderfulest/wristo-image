@@ -1,3 +1,5 @@
+import { MAX_CUTOUT_TOLERANCE } from './cutoutTolerance'
+
 export const CUTOUT_PREFERENCES_STORAGE_KEY = 'wristo-image:cutout-preferences:v1'
 
 export interface CutoutPreferences {
@@ -25,7 +27,7 @@ export const loadCutoutPreferences = (storage: Storage): CutoutPreferences => {
       trimWhitespace: typeof parsed.trimWhitespace === 'boolean'
         ? parsed.trimWhitespace
         : DEFAULT_PREFERENCES.trimWhitespace,
-      tolerance: Number.isInteger(parsed.tolerance) && Number(parsed.tolerance) >= 0 && Number(parsed.tolerance) <= 120
+      tolerance: Number.isInteger(parsed.tolerance) && Number(parsed.tolerance) >= 0 && Number(parsed.tolerance) <= MAX_CUTOUT_TOLERANCE
         ? Number(parsed.tolerance)
         : DEFAULT_PREFERENCES.tolerance,
     }

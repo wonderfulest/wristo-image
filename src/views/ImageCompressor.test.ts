@@ -34,6 +34,20 @@ describe('ImageCompressor', () => {
     expect(wrapper.text()).toContain('图片仅在当前浏览器中处理')
   })
 
+  it('keeps the preview canvas in the workbench flow when shared checker styles exist', () => {
+    const sharedStyles = document.createElement('style')
+    sharedStyles.textContent = '.checker { position: absolute; inset: 26px 30px; opacity: .75; }'
+    document.head.appendChild(sharedStyles)
+    const wrapper = mount(ImageCompressor, { attachTo: document.body })
+
+    const preview = wrapper.get('.preview-canvas')
+    expect(getComputedStyle(preview.element).position).not.toBe('absolute')
+    expect(getComputedStyle(preview.element).opacity).not.toBe('0.75')
+
+    wrapper.unmount()
+    sharedStyles.remove()
+  })
+
   it('loads a supported image and shows its name, size and dimensions', async () => {
     const wrapper = mount(ImageCompressor)
     const input = wrapper.get('input[type="file"]')

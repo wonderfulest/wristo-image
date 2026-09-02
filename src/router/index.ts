@@ -11,6 +11,12 @@ export default createRouter({
       meta: { editor: true },
     },
     {
+      path: '/font-editor',
+      name: 'font-editor',
+      component: () => import('@/views/FontEditor.vue'),
+      meta: { editor: true },
+    },
+    {
       path: '/tools/background-remover',
       redirect: { path: '/editor', query: { tool: 'background-remover' } },
     },

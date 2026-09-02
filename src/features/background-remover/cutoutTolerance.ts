@@ -1,0 +1,1 @@
+export const MAX_CUTOUT_TOLERANCE = 442

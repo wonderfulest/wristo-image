@@ -206,7 +206,7 @@
             class="tolerance-slider"
             type="range"
             min="0"
-            max="120"
+            :max="MAX_CUTOUT_TOLERANCE"
             step="1"
             v-model.number="tolerance"
             :disabled="!selection"
@@ -769,6 +769,7 @@ import {
   loadCutoutPreferences,
   saveCutoutPreferences,
 } from "@/features/background-remover/cutoutPreferences";
+import { MAX_CUTOUT_TOLERANCE } from "@/features/background-remover/cutoutTolerance";
 import {
   applyCutoutOutputOptions,
   fillSelectionWithColor,

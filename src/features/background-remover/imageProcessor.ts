@@ -1,3 +1,5 @@
+import { MAX_CUTOUT_TOLERANCE } from './cutoutTolerance'
+
 export interface PixelImage {
   width: number
   height: number
@@ -163,7 +165,7 @@ export const removeConnectedBackground = (
   const background = dominantBorderColor(result)
   if (!background) return result
 
-  const safeTolerance = Math.max(0, Math.min(442, tolerance))
+  const safeTolerance = Math.max(0, Math.min(MAX_CUTOUT_TOLERANCE, tolerance))
   for (let index = 0; index < result.width * result.height; index += 1) {
     if (matchesBackground(result, index, background, safeTolerance)) {
       result.data[index * 4 + 3] = 0

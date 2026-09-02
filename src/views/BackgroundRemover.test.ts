@@ -108,6 +108,12 @@ describe('ImageEditor', () => {
     expect(wrapper.get('[data-testid="trim-whitespace"]').attributes('type')).toBe('checkbox')
   })
 
+  it('offers the full RGB color-distance tolerance range', () => {
+    const wrapper = mount(ImageEditor)
+
+    expect(wrapper.get('[data-testid="tolerance-input"]').attributes('max')).toBe('442')
+  })
+
   it('prefers locally persisted cutout settings and saves later changes', async () => {
     localStorage.setItem(CUTOUT_PREFERENCES_STORAGE_KEY, JSON.stringify({
       version: 1,

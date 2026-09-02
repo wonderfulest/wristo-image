@@ -16,13 +16,13 @@ describe('Home', () => {
     expect(primaryAction?.props('to')).toBe('/editor')
   })
 
-  it('shows all eleven editing tools as direct entry points', () => {
+  it('shows all image tools and the font editor as direct entry points', () => {
     const wrapper = mount(Home, {
       global: { stubs: { RouterLink: RouterLinkStub } },
     })
 
     const toolLinks = wrapper.findAll('[data-testid="home-tool-link"]')
-    expect(toolLinks).toHaveLength(11)
+    expect(toolLinks).toHaveLength(12)
     expect(toolLinks.map(link => link.text())).toEqual(expect.arrayContaining([
       expect.stringContaining('快速抠图'),
       expect.stringContaining('AI 去水印'),
@@ -35,6 +35,7 @@ describe('Home', () => {
       expect.stringContaining('调整尺寸'),
       expect.stringContaining('旋转翻转'),
       expect.stringContaining('图片压缩'),
+      expect.stringContaining('字体编辑器'),
     ]))
   })
 
