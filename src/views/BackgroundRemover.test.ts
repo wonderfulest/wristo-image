@@ -192,9 +192,10 @@ describe('ImageEditor', () => {
     const rail = wrapper.get('[data-testid="tool-rail"]')
 
     expect(rail.findAll('[data-tool-id]').map(tool => tool.attributes('data-tool-id'))).toEqual([
-      'background-remover', 'ai-watermark-remover', 'smart-erase', 'background-fill', 'restore', 'background', 'outline', 'crop', 'resize', 'rotate-flip',
+      'background-remover', 'path-cutout', 'ai-watermark-remover', 'smart-erase', 'background-fill', 'restore', 'background', 'outline', 'crop', 'resize', 'rotate-flip',
     ])
     expect(rail.text()).toContain('快速抠图')
+    expect(rail.text()).toContain('路径镂空')
     expect(rail.text()).toContain('AI 去水印')
     expect(rail.text()).toContain('智能擦除')
     expect(rail.text()).toContain('背景填色')
@@ -207,6 +208,7 @@ describe('ImageEditor', () => {
     expect(rail.text()).toContain('上传')
     expect(rail.text()).toContain('导出')
     expect(wrapper.get('[data-testid="category-tool-list"]').text()).toContain('快速抠图')
+    expect(wrapper.get('[data-testid="category-tool-list"]').text()).toContain('路径镂空')
     expect(wrapper.get('[data-testid="category-tool-list"]').text()).toContain('智能擦除')
     expect(wrapper.get('[data-testid="category-tool-list"]').text()).toContain('背景填色')
     expect(wrapper.get('[data-testid="category-tool-list"]').text()).toContain('恢复')
@@ -223,6 +225,18 @@ describe('ImageEditor', () => {
     expect(wrapper.get('[data-testid="category-tool-list"]').text()).toContain('裁剪')
     expect(wrapper.get('[data-testid="category-tool-list"]').text()).toContain('调整尺寸')
     expect(wrapper.get('[data-testid="category-tool-list"]').text()).toContain('旋转翻转')
+  })
+
+  it('offers an editable path cutout with fixed equal segments', async () => {
+    const wrapper = mount(ImageEditor)
+    await uploadTestImage(wrapper)
+
+    await wrapper.get('[data-testid="tool-rail"] [data-tool-id="path-cutout"]').trigger('click')
+
+    expect(wrapper.get('[data-testid="tool-panel"]').text()).toContain('路径镂空')
+    expect(wrapper.get('[data-testid="tool-panel"]').text()).toContain('平滑曲线')
+    expect(wrapper.get('[data-testid="path-cutout-preview"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-testid="path-cutout-clear"]').attributes('disabled')).toBeDefined()
   })
 
   it('previews an exact correction angle and commits it only when applied', async () => {

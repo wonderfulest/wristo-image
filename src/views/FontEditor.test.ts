@@ -8,7 +8,7 @@ describe('FontEditor', () => {
       global: { stubs: { RouterLink: RouterLinkStub } },
     })
 
-    expect(wrapper.text()).toContain('字体编辑器')
+    expect(wrapper.text()).toContain('时间数字编辑器')
     expect(wrapper.text()).toContain('0123456789:')
     expect(wrapper.find('[data-testid="font-source-input"]').attributes('accept')).toContain('.ttf')
     expect(wrapper.findAll('[data-testid="recipe-control"]')).toHaveLength(9)

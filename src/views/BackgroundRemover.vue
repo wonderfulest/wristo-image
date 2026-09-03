@@ -248,6 +248,49 @@
         </section>
 
         <section
+          v-if="activeTool.id === 'path-cutout'"
+          class="panel-section operation-panel path-cutout-panel"
+        >
+          <div class="section-title"><span>路径与形状</span></div>
+          <div class="path-cutout-actions">
+            <button type="button" :class="{ active: !pathCutoutSmooth }" @click="pathCutoutSmooth = false">折线路径</button>
+            <button type="button" :class="{ active: pathCutoutSmooth }" @click="pathCutoutSmooth = true">平滑曲线</button>
+          </div>
+          <p>在画布上点击添加节点；拖动已有节点可调整路径。</p>
+          <label>格数
+            <input v-model.number="pathCutoutCount" type="range" min="2" max="32" step="1" />
+            <output>{{ pathCutoutCount }}</output>
+          </label>
+          <label>间距
+            <input v-model.number="pathCutoutGap" type="range" min="0" max="80" step="1" />
+            <output>{{ pathCutoutGap }} px</output>
+          </label>
+          <label>高度
+            <input v-model.number="pathCutoutHeight" type="range" min="2" max="240" step="1" />
+            <output>{{ pathCutoutHeight }} px</output>
+          </label>
+          <label>斜切
+            <input v-model.number="pathCutoutSlant" type="range" min="-80" max="80" step="1" />
+            <output>{{ pathCutoutSlant }} px</output>
+          </label>
+          <label>圆角
+            <input v-model.number="pathCutoutCornerRadius" type="range" min="0" max="80" step="1" />
+            <output>{{ pathCutoutCornerRadius }} px</output>
+          </label>
+          <div class="path-cutout-actions">
+            <button type="button" :disabled="!pathCutoutPoints.length" @click="removeLastPathCutoutPoint">撤销节点</button>
+            <button data-testid="path-cutout-clear" type="button" :disabled="!pathCutoutPoints.length" @click="clearPathCutout">清空路径</button>
+          </div>
+          <button
+            data-testid="path-cutout-preview"
+            class="primary-operation"
+            type="button"
+            :disabled="pathCutoutPoints.length < 2"
+            @click="previewPathCutout"
+          >生成透明预览</button>
+        </section>
+
+        <section
           v-if="activeTool.id === 'background-remover'"
           class="panel-section instructions"
         >
@@ -726,6 +769,12 @@ import {
   type ImageFitMode,
 } from "@/features/editor/imageOperations";
 import {
+  applyPathCutout,
+  createPathCutoutSegments,
+  type PathCutoutOptions,
+  type PathCutoutPoint,
+} from "@/features/editor/pathCutout";
+import {
   loadResizeMode,
   saveResizeMode,
 } from "@/features/editor/resizePreferences";
@@ -922,6 +971,15 @@ const backgroundImage = ref<PixelImage | null>(null);
 const backgroundFit = ref<"cover" | "contain" | "stretch">("cover");
 const outlineWidth = ref(0);
 const outlineColor = ref("#ffffff");
+const pathCutoutPoints = ref<PathCutoutPoint[]>([]);
+const pathCutoutDragIndex = ref<number | null>(null);
+let lastPathCutoutStart: { x: number; y: number } | null = null;
+const pathCutoutSmooth = ref(true);
+const pathCutoutCount = ref(10);
+const pathCutoutGap = ref(8);
+const pathCutoutHeight = ref(28);
+const pathCutoutSlant = ref(10);
+const pathCutoutCornerRadius = ref(4);
 const cropRatios = [
   { label: "自由", value: null },
   { label: "1:1", value: 1 },
@@ -986,8 +1044,19 @@ const workspaceMessage = computed(() =>
               : "涂抹减少 AI 修复范围"
         : activeTool.value.id === "background-remover"
           ? "拖动鼠标框选要保留的图标"
+          : activeTool.value.id === "path-cutout"
+            ? "点击添加路径节点，拖动节点调整弧线"
           : "图片预览",
 );
+const pathCutoutOptions = computed<PathCutoutOptions>(() => ({
+  points: pathCutoutPoints.value,
+  smooth: pathCutoutSmooth.value,
+  count: pathCutoutCount.value,
+  gap: pathCutoutGap.value,
+  height: pathCutoutHeight.value,
+  slant: pathCutoutSlant.value,
+  cornerRadius: pathCutoutCornerRadius.value,
+}));
 const cutoutBackground = computed<CutoutBackground>(() => {
   if (backgroundType.value === "color")
     return { type: "color", color: backgroundColor.value };
@@ -1026,6 +1095,10 @@ watch([outputAspectRatio, trimWhitespace, tolerance], () => {
   if (activeTool.value.id === "background-remover" && previewImage.value) void showPreview();
 });
 
+watch(pathCutoutOptions, () => {
+  if (activeTool.value.id === "path-cutout" && !previewImage.value) void nextTick(drawEditor);
+});
+
 const pixelImageFromBitmap = (bitmap: ImageBitmap): PixelImage => {
   const canvas = document.createElement("canvas");
   canvas.width = bitmap.width;
@@ -1053,6 +1126,41 @@ const drawPixelImage = (canvas: HTMLCanvasElement, image: PixelImage): void => {
   );
 };
 
+const drawPathCutoutOverlay = (context: CanvasRenderingContext2D): void => {
+  if (activeTool.value.id !== "path-cutout" || previewImage.value) return;
+  const points = pathCutoutPoints.value;
+  if (!points.length) return;
+  context.save();
+  context.lineWidth = 2;
+  context.strokeStyle = "#ff8124";
+  context.fillStyle = "rgba(255, 129, 36, .24)";
+  context.setLineDash([8, 6]);
+  context.beginPath();
+  points.forEach((point, index) => index ? context.lineTo(point.x, point.y) : context.moveTo(point.x, point.y));
+  context.stroke();
+  context.setLineDash([]);
+  for (const segment of createPathCutoutSegments(pathCutoutOptions.value)) {
+    context.save();
+    context.translate(segment.center.x, segment.center.y);
+    context.rotate(segment.angle);
+    context.transform(1, 0, segment.slant / segment.height, 1, 0, 0);
+    context.beginPath();
+    context.roundRect(-segment.width / 2, -segment.height / 2, segment.width, segment.height, segment.cornerRadius);
+    context.fill();
+    context.stroke();
+    context.restore();
+  }
+  points.forEach((point, index) => {
+    context.beginPath();
+    context.arc(point.x, point.y, 5, 0, Math.PI * 2);
+    context.fillStyle = index === pathCutoutDragIndex.value ? "#ffffff" : "#ff8124";
+    context.fill();
+    context.strokeStyle = "#252a30";
+    context.stroke();
+  });
+  context.restore();
+};
+
 const drawEditor = (): void => {
   const canvas = editorCanvas.value;
   const image = sourceImage.value;
@@ -1077,12 +1185,13 @@ const drawEditor = (): void => {
       canvas.getContext("2d")?.drawImage(overlay, 0, 0);
     }
   }
+  const context = canvas.getContext("2d");
+  if (!context) return;
+  drawPathCutoutOverlay(context);
   const current =
     selection.value &&
     normalizeSelection(selection.value, image.width, image.height);
   if (!current) return;
-  const context = canvas.getContext("2d");
-  if (!context) return;
   context.save();
   context.fillStyle = "rgba(3, 7, 12, .58)";
   context.beginPath();
@@ -1371,8 +1480,54 @@ const updateCropCursor = (event: PointerEvent): void => {
   canvas.style.cursor = handle ? cropCursors[handle] : "crosshair";
 };
 
+const hitPathCutoutPoint = (point: PathCutoutPoint): number => {
+  const radius = Math.max(8, (sourceImage.value?.width ?? 800) / 100);
+  for (let index = pathCutoutPoints.value.length - 1; index >= 0; index -= 1) {
+    const candidate = pathCutoutPoints.value[index]!;
+    if (Math.hypot(candidate.x - point.x, candidate.y - point.y) <= radius) return index;
+  }
+  return -1;
+};
+
+const removeLastPathCutoutPoint = (): void => {
+  pathCutoutPoints.value = pathCutoutPoints.value.slice(0, -1);
+  drawEditor();
+};
+const clearPathCutout = (): void => {
+  pathCutoutPoints.value = [];
+  pathCutoutDragIndex.value = null;
+  lastPathCutoutStart = null;
+  errorMessage.value = "";
+  drawEditor();
+};
+const previewPathCutout = (): void => {
+  const source = sourceImage.value;
+  if (!source || pathCutoutPoints.value.length < 2) return;
+  const segments = createPathCutoutSegments(pathCutoutOptions.value);
+  if (!segments.length) {
+    errorMessage.value = "路径长度不足，请添加或拉开至少两个节点。";
+    return;
+  }
+  toolSession.value = new CanvasToolSession(source);
+  previewImage.value = toolSession.value.preview(applyPathCutout(source, pathCutoutOptions.value));
+  errorMessage.value = "";
+  void showPreview();
+};
+
 const startSelection = (event: PointerEvent): void => {
   if (event.button !== 0) return;
+  if (activeTool.value.id === "path-cutout" && !previewImage.value) {
+    if (lastPathCutoutStart?.x === event.clientX && lastPathCutoutStart.y === event.clientY) return;
+    lastPathCutoutStart = { x: event.clientX, y: event.clientY };
+    const point = pointInImage(event);
+    if (!point) return;
+    const existing = hitPathCutoutPoint(point);
+    if (existing >= 0) pathCutoutDragIndex.value = existing;
+    else pathCutoutPoints.value = [...pathCutoutPoints.value, point];
+    editorCanvas.value?.setPointerCapture(event.pointerId);
+    drawEditor();
+    return;
+  }
   if (activeTool.value.id === "ai-watermark-remover" && watermarkMaskMode.value !== "rectangle") {
     const point = pointInImage(event);
     if (!point || !watermarkMask.value) return;
@@ -1405,6 +1560,13 @@ const startSelection = (event: PointerEvent): void => {
   editorCanvas.value?.setPointerCapture(event.pointerId);
 };
 const moveSelection = (event: PointerEvent): void => {
+  if (activeTool.value.id === "path-cutout" && pathCutoutDragIndex.value !== null) {
+    const point = pointInImage(event);
+    if (!point) return;
+    pathCutoutPoints.value = pathCutoutPoints.value.map((candidate, index) => index === pathCutoutDragIndex.value ? point : candidate);
+    drawEditor();
+    return;
+  }
   if (watermarkPainting.value && watermarkMask.value) {
     const point = pointInImage(event);
     if (!point) return;
@@ -1446,6 +1608,12 @@ const moveSelection = (event: PointerEvent): void => {
   drawEditor();
 };
 const finishSelection = (event: PointerEvent): void => {
+  if (activeTool.value.id === "path-cutout") {
+    moveSelection(event);
+    pathCutoutDragIndex.value = null;
+    drawEditor();
+    return;
+  }
   if (watermarkPainting.value) {
     moveSelection(event);
     watermarkPainting.value = false;
@@ -1714,6 +1882,11 @@ const commitImage = (image: PixelImage): void => {
   if (!history.value) history.value = new ImageHistory(image);
   historyRevision.value += 1;
   selection.value = null;
+  if (activeTool.value.id === "path-cutout") {
+    pathCutoutPoints.value = [];
+    pathCutoutDragIndex.value = null;
+    lastPathCutoutStart = null;
+  }
   previewImage.value = null;
   toolSession.value = null;
   resizeWidth.value = image.width;
@@ -1952,6 +2125,7 @@ const onStagePointerUp = (): void => {
     clearPendingLongPress();
     beginToolGesture(pending);
   }
+  if (activeTool.value.id === "path-cutout") pathCutoutDragIndex.value = null;
   endPan();
 };
 
@@ -2680,6 +2854,30 @@ const downloadExport = (): void => {
   margin: 0;
   color: #818992;
   font-size: 10px;
+}
+.path-cutout-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+.path-cutout-actions button {
+  min-width: 0;
+  border: 1px solid #dfe3e7;
+  border-radius: 7px;
+  padding: 8px 6px;
+  background: #fff;
+  color: #535c65;
+  cursor: pointer;
+  font-size: 10px;
+}
+.path-cutout-actions button.active {
+  border-color: #ff8124;
+  background: #fff5ed;
+  color: #d85d09;
+}
+.path-cutout-actions button:disabled {
+  cursor: not-allowed;
+  opacity: .45;
 }
 .operation-panel label {
   display: grid;

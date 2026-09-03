@@ -1,7 +1,7 @@
 <template>
   <main class="font-editor-page">
     <header class="font-editor-topbar">
-      <RouterLink class="font-editor-brand" to="/"><span>WRISTO / IMAGE</span><b>字体编辑器</b></RouterLink>
+      <RouterLink class="font-editor-brand" to="/"><span>WRISTO / IMAGE</span><b>时间数字编辑器</b></RouterLink>
       <div class="topbar-meta"><span class="local-state"><i /> 本地处理</span><span>{{ source?.family || '未载入字体' }}</span></div>
       <button data-testid="download-glyphs" class="export-button" type="button" :disabled="!canDownload" @click="downloadGlyphs">
         {{ downloading ? '正在生成…' : '下载 PNG 字体' }} <span>↓</span>
@@ -27,7 +27,7 @@
       </aside>
 
       <section class="font-preview-panel">
-        <div class="preview-heading"><div><span>02 / PREVIEW</span><h1>字体编辑器</h1></div><p>预览与导出使用相同的浏览器渲染链路</p></div>
+        <div class="preview-heading"><div><span>02 / PREVIEW</span><h1>时间数字编辑器</h1></div><p>预览与导出使用相同的浏览器渲染链路</p></div>
         <div class="hero-preview">
           <div v-if="rendering" class="preview-placeholder">正在渲染字形…</div>
           <div v-else-if="!source" class="preview-placeholder"><b>0123456789:</b><span>上传字体后开始编辑</span></div>

@@ -21,10 +21,17 @@ describe('image editor routes', () => {
     expect(route?.redirect).toEqual({ path: '/editor', query: { tool: 'image-compressor' } })
   })
 
-  it('registers the font editor as a full-screen workbench', () => {
+  it('registers the time number editor as a full-screen workbench', () => {
     const route = router.getRoutes().find(candidate => candidate.path === '/font-editor')
 
     expect(route?.name).toBe('font-editor')
+    expect(route?.meta).toMatchObject({ editor: true })
+  })
+
+  it('registers transparent text assets as their own full-screen tool', () => {
+    const route = router.getRoutes().find(candidate => candidate.path === '/text-assets')
+
+    expect(route?.name).toBe('text-assets')
     expect(route?.meta).toMatchObject({ editor: true })
   })
 })

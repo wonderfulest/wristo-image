@@ -17,6 +17,12 @@ export default createRouter({
       meta: { editor: true },
     },
     {
+      path: '/text-assets',
+      name: 'text-assets',
+      component: () => import('@/views/TextAssetGenerator.vue'),
+      meta: { editor: true },
+    },
+    {
       path: '/tools/background-remover',
       redirect: { path: '/editor', query: { tool: 'background-remover' } },
     },

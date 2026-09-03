@@ -33,7 +33,7 @@
 
     <section id="all-tools" class="tool-section" aria-labelledby="tool-title">
       <div class="section-heading">
-        <div><span>TOOLS / 11</span><h2 id="tool-title">你需要的，都在这里</h2></div>
+        <div><span>TOOLS / 14</span><h2 id="tool-title">你需要的，都在这里</h2></div>
         <p>从简单调整到背景处理，点开就能使用。</p>
       </div>
       <div class="tool-grid">
@@ -67,7 +67,8 @@ import { editorTools } from '@/features/editor/toolRegistry'
 const homeTools = [
   ...editorTools.map(tool => ({ ...tool, to: `/editor?tool=${tool.id}`, featured: tool.id === 'background-remover' })),
   { id: 'image-compressor', title: '图片压缩', description: '设定目标大小，在文件体积与清晰度之间自动取得平衡。', icon: '⇣', to: '/editor?tool=image-compressor', featured: true },
-  { id: 'font-editor', title: '字体编辑器', description: '导入 TTF 或 OTF，调节字重、倾斜、描边与渐变，导出数字和冒号 PNG。', icon: 'Aa', to: '/font-editor', featured: true },
+  { id: 'font-editor', title: '时间数字编辑器', description: '导入 TTF 或 OTF，调节字重、倾斜、描边与渐变，导出数字和冒号 PNG。', icon: '12', to: '/font-editor', featured: true },
+  { id: 'text-assets', title: '透明文字素材', description: '批量输入星期、AM/PM 或 24H 等文字，分别配色并导出同尺寸透明 PNG。', icon: 'Aa', to: '/text-assets', featured: true },
 ]
 </script>
 

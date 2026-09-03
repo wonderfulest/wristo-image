@@ -1,5 +1,5 @@
 export type EditorCategoryId = 'cutout' | 'adjust'
-export type EditorToolId = 'background-remover' | 'ai-watermark-remover' | 'smart-erase' | 'background-fill' | 'restore' | 'background' | 'outline' | 'crop' | 'resize' | 'rotate-flip'
+export type EditorToolId = 'background-remover' | 'path-cutout' | 'ai-watermark-remover' | 'smart-erase' | 'background-fill' | 'restore' | 'background' | 'outline' | 'crop' | 'resize' | 'rotate-flip'
 
 export interface EditorCategoryDefinition {
   id: EditorCategoryId
@@ -22,6 +22,7 @@ export const editorCategories: readonly EditorCategoryDefinition[] = [
 
 export const editorTools: readonly EditorToolDefinition[] = [
   { id: 'background-remover', categoryId: 'cutout', title: '快速抠图', description: '框选图片中的图标，清除选区内全部近似背景色，包括封闭区域。', icon: '✦' },
+  { id: 'path-cutout', categoryId: 'cutout', title: '路径镂空', description: '沿直线、折线或平滑曲线等距生成一排透明平行四边形。', icon: '╱' },
   { id: 'ai-watermark-remover', categoryId: 'cutout', title: 'AI 去水印', description: '自动识别并修复文字水印，也可调整蒙版后重新修复。', icon: '◇' },
   { id: 'smart-erase', categoryId: 'cutout', title: '智能擦除', description: '涂抹不需要的区域，并用周围背景智能补齐。', icon: '◌' },
   { id: 'background-fill', categoryId: 'cutout', title: '背景填色', description: '框选矩形区域，使用纯色或周围背景内容进行填充。', icon: '▣' },
