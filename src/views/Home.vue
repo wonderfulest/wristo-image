@@ -9,7 +9,7 @@
           <RouterLink class="hero-action" to="/editor">开始编辑图片 <span>↗</span></RouterLink>
           <a class="tool-jump" href="#all-tools">查看全部工具 <span>↓</span></a>
         </div>
-        <div class="privacy-line"><span /> 常规工具本地处理 · 无需登录 · AI 去水印按需上传</div>
+        <div class="privacy-line"><span /> 常规工具本地处理 · 无需登录 · AI 功能需登录并消耗积分</div>
       </div>
 
       <div class="editor-preview" aria-hidden="true">
@@ -55,7 +55,7 @@
     <section class="local-section" aria-label="本地处理说明">
       <span class="local-number">02</span>
       <div><p class="local-kicker">LOCAL FIRST</p><h2>图片不必绕远路。</h2></div>
-      <p>常规编辑与导出直接在浏览器中完成；仅在使用 AI 去水印时，图片会临时发送到 Wristo 服务端处理。</p>
+      <p>常规编辑与导出直接在浏览器中完成；AI 去水印需登录 Wristo 并消耗积分，提交前显示本次费用；图片会临时发送到 Wristo 服务端处理。</p>
       <RouterLink to="/editor">选择一张图片 <span>→</span></RouterLink>
     </section>
   </main>

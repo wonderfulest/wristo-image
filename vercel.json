@@ -10,7 +10,11 @@
     },
     {
       "source": "/api/image-tools/:path*",
-      "destination": "https://api.wristo.cn/api/public/image-tools/:path*"
+      "destination": "https://api.wristo.io/api/image-tools/:path*"
+    },
+    {
+      "source": "/wristo-api/:path*",
+      "destination": "https://api.wristo.io/api/:path*"
     },
     {
       "source": "/(.*)",

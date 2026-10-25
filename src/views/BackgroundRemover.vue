@@ -144,11 +144,22 @@
           class="panel-section operation-panel watermark-panel"
         >
           <div class="section-title"><span>AI 修复</span></div>
+          <p v-if="!signedIn">AI 功能需要登录 Wristo，并消耗积分。</p>
+          <button v-if="!signedIn" type="button" :disabled="loginBusy" @click="loginForAi">{{ loginBusy ? '正在登录…' : '登录 Wristo' }}</button>
+          <template v-else>
+            <p v-if="imageAccount">余额 {{ imageAccount.balance }} 积分 · 每次 {{ imageAccount.creditCost }} 积分</p>
+            <p v-else>请刷新积分信息后使用 AI。</p>
+            <button type="button" :disabled="watermarkBusy" @click="refreshImageAccount().catch(error => errorMessage = error.message)">刷新积分</button>
+            <button type="button" :disabled="watermarkBusy || !!pendingWatermarkTask" @click="signOut">退出登录</button>
+            <p v-if="imageAccount && imageAccount.balance < imageAccount.creditCost">积分不足，请前往 <a href="https://studio.wristo.io" target="_blank" rel="noopener">Wristo Studio</a> 获取积分。</p>
+          </template>
+          <p>每次重新修复均单独计费；处理失败自动退回积分。撤销或下载不重复扣费。结果临时保留 30 分钟，请及时下载。</p>
+          <button v-if="pendingWatermarkTask" type="button" :disabled="watermarkBusy || !signedIn" @click="resumeWatermarkTask">继续查询上次任务（不重复扣费）</button>
           <button
             data-testid="watermark-auto-button"
             class="primary-operation"
             type="button"
-            :disabled="watermarkBusy || !sourceImage"
+            :disabled="watermarkBusy || !sourceImage || !signedIn || !imageAccount || imageAccount.balance < imageAccount.creditCost || !!pendingWatermarkTask"
             @click="runAutomaticWatermarkRemoval"
           >{{ watermarkBusy ? watermarkProgressLabel : '自动识别并去除' }}</button>
           <div class="watermark-mask-modes">
@@ -165,7 +176,7 @@
             data-testid="watermark-mask-submit"
             class="primary-operation"
             type="button"
-            :disabled="watermarkBusy || !watermarkMaskHasPixels"
+            :disabled="watermarkBusy || !watermarkMaskHasPixels || !signedIn || !imageAccount || imageAccount.balance < imageAccount.creditCost || !!pendingWatermarkTask"
             @click="runMaskedWatermarkRemoval"
           >按调整范围重新修复</button>
           <small class="watermark-upload-notice">仅处理你拥有或已获授权的图片。图片会上传至 Wristo 服务端并由阿里云百炼处理。</small>
@@ -740,6 +751,7 @@
 
 <script setup lang="ts">
 import { encodeWatermarkUpload } from "@/features/watermark-remover/watermarkUpload";
+import { ApiError, authHeaders, signIn, signOut, signedIn } from "@/features/auth/imageAuth";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, triggerRef, watch } from "vue";
 import {
   editorCategories,
@@ -835,6 +847,8 @@ import ImageHistoryPanel, {
 import AppModal from "@/components/ui/AppModal.vue";
 import {
   createWatermarkRemovalTask,
+  getImageAccount,
+  getWatermarkRemovalTask,
   waitForWatermarkRemoval,
 } from "@/features/watermark-remover/watermarkRemovalApi";
 import {
@@ -868,6 +882,33 @@ const sourceMimeType = ref("");
 const errorMessage = ref("");
 const toolNotice = ref("");
 const watermarkBusy = ref(false);
+const imageAccount = ref<{ userId: string; balance: number; creditCost: number } | null>(null);
+const loginBusy = ref(false);
+const pendingWatermarkTask = ref<string | null>(null);
+const refreshImageAccount = async () => {
+  imageAccount.value = signedIn.value ? await getImageAccount() : null;
+  if (imageAccount.value) {
+    pendingWatermarkTask.value = sessionStorage.getItem(`wristo-image-pending:${imageAccount.value.userId}`);
+    if (pendingWatermarkTask.value) {
+      activeTool.value = resolveEditorTool("ai-watermark-remover");
+      activeCategory.value = "cutout";
+    }
+  }
+};
+watch(pendingWatermarkTask, (id) => {
+  if (!imageAccount.value) return;
+  const key = `wristo-image-pending:${imageAccount.value.userId}`;
+  if (id) sessionStorage.setItem(key, id);
+  else sessionStorage.removeItem(key);
+}, { flush: "sync" });
+const loginForAi = async () => {
+  loginBusy.value = true;
+  try { await signIn(); await refreshImageAccount(); }
+  catch (error) { errorMessage.value = error instanceof Error ? error.message : "登录失败"; }
+  finally { loginBusy.value = false; }
+};
+watch(signedIn, () => { imageAccount.value = null; });
+
 const watermarkProgressLabel = ref("正在上传…");
 const watermarkMaskMode = ref<"rectangle" | "add" | "erase">("rectangle");
 const watermarkBrushSize = ref(36);
@@ -1240,6 +1281,7 @@ const refreshLocalImageHistory = async (): Promise<void> => {
 };
 
 onMounted(() => {
+  if (signedIn.value) void refreshImageAccount().catch(error => { errorMessage.value = String(error.message); });
   void refreshLocalImageHistory().catch((error) => {
     console.warn("无法读取本地图片历史：", error);
   });
@@ -1800,8 +1842,12 @@ const encodeWatermarkMask = (mask: WatermarkMask): Promise<Blob> => {
 };
 
 const applyWatermarkResult = async (resultUrl: string): Promise<void> => {
-  const response = await fetch(resultUrl, { cache: "no-store" });
-  if (!response.ok) throw new Error("AI 修复结果暂时无法下载");
+  const response = await fetch(resultUrl, { cache: "no-store", headers: authHeaders() });
+  if (!response.ok || !response.headers.get("Content-Type")?.startsWith("image/")) {
+    const body = await response.json().catch(() => ({}));
+    if (body.code === 410 || response.status === 410) pendingWatermarkTask.value = null;
+    throw new Error(body.msg || "AI 修复结果暂时无法下载");
+  }
   const bitmap = await createImageBitmap(await response.blob());
   const result = pixelImageFromBitmap(bitmap);
   bitmap.close();
@@ -1811,29 +1857,63 @@ const applyWatermarkResult = async (resultUrl: string): Promise<void> => {
 };
 
 const runWatermarkRemoval = async (mode: "automatic" | "mask"): Promise<void> => {
+  if (!signedIn.value || pendingWatermarkTask.value) return;
   const original = mode === "automatic" ? sourceImage.value : watermarkOriginalImage.value;
   if (!original || (mode === "mask" && !watermarkMask.value)) return;
   watermarkBusy.value = true;
   errorMessage.value = "";
   watermarkProgressLabel.value = "正在上传…";
   try {
+    await refreshImageAccount();
+    const account = imageAccount.value!;
+    if (account.balance < account.creditCost) throw new Error("积分不足，请补充积分后重试");
+    if (!window.confirm(`本次 AI 修复将消耗 ${account.creditCost} 积分，失败自动退回。是否继续？`)) return;
     if (mode === "automatic") {
       watermarkOriginalImage.value = original;
       watermarkMask.value = createWatermarkMask(original.width, original.height);
     }
     const image = await encodeWatermarkUpload(original);
     const mask = mode === "mask" ? await encodeWatermarkMask(watermarkMask.value!) : undefined;
-    const task = await createWatermarkRemovalTask({ image, mask, mode });
+    const requestId = crypto.randomUUID();
+    pendingWatermarkTask.value = requestId;
+    const task = await createWatermarkRemovalTask({ image, mask, mode, expectedCreditCost: account.creditCost, requestId });
     watermarkProgressLabel.value = "AI 正在识别与修复…";
     const status = await waitForWatermarkRemoval(task.taskToken);
     if (!status.resultUrl) throw new Error("AI 去水印任务未返回结果");
     watermarkProgressLabel.value = "正在获取结果…";
     await applyWatermarkResult(status.resultUrl);
+    pendingWatermarkTask.value = null;
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : "AI 去水印处理失败";
   } finally {
     watermarkBusy.value = false;
+    void refreshImageAccount().catch(() => {});
+    await clearFinishedWatermarkTask();
   }
+};
+
+const clearFinishedWatermarkTask = async () => {
+  if (!pendingWatermarkTask.value) return;
+  try {
+    const status = await getWatermarkRemovalTask(pendingWatermarkTask.value);
+    if (status.status === "failed" || status.status === "expired") pendingWatermarkTask.value = null;
+  } catch (error) {
+    // A definitive not-found means submission was rejected before a task/debit was created.
+    if (error instanceof ApiError && (error.code === 404 || error.code === 410)) pendingWatermarkTask.value = null;
+  }
+};
+const resumeWatermarkTask = async () => {
+  if (!pendingWatermarkTask.value || watermarkBusy.value) return;
+  watermarkBusy.value = true;
+  errorMessage.value = "";
+  watermarkProgressLabel.value = "正在查询上次任务…";
+  try {
+    const status = await waitForWatermarkRemoval(pendingWatermarkTask.value);
+    if (!status.resultUrl) throw new Error("AI 结果暂时不可用");
+    await applyWatermarkResult(status.resultUrl);
+    pendingWatermarkTask.value = null;
+  } catch (error) { errorMessage.value = error instanceof Error ? error.message : "查询失败，请重试"; }
+  finally { watermarkBusy.value = false; await clearFinishedWatermarkTask(); void refreshImageAccount().catch(() => {}); }
 };
 
 const runAutomaticWatermarkRemoval = (): void => { void runWatermarkRemoval("automatic"); };

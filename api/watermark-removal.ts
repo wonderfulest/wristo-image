@@ -19,6 +19,12 @@ export default async function handler(
     fail(405, '仅支持上传图片')
     return
   }
+  const authorization = request.headers.authorization
+  const requestId = request.headers['x-ai-request-id']
+  if (!authorization?.startsWith('Bearer ') || typeof requestId !== 'string') {
+    fail(401, '请先登录 Wristo，再使用 AI 功能')
+    return
+  }
   const contentType = request.headers['content-type'] ?? ''
   if (!contentType.startsWith('multipart/form-data;')) {
     fail(400, '请使用图片表单上传')
@@ -36,9 +42,9 @@ export default async function handler(
       }
       chunks.push(bytes)
     }
-    const upstream = await fetcher('https://api.wristo.cn/api/public/image-tools/watermark-removal/tasks', {
+    const upstream = await fetcher('https://api.wristo.io/api/image-tools/watermark-removal/tasks', {
       method: 'POST',
-      headers: { 'Content-Type': contentType },
+      headers: { 'Content-Type': contentType, Authorization: authorization, 'X-AI-Request-Id': requestId },
       body: Buffer.concat(chunks),
       signal: AbortSignal.timeout(45_000),
     })
