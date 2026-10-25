@@ -739,7 +739,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, triggerRef, watch } from "vue";
 import {
   editorCategories,
   editorTools,
@@ -1533,6 +1533,7 @@ const startSelection = (event: PointerEvent): void => {
     if (!point || !watermarkMask.value) return;
     watermarkPainting.value = true;
     applyMaskBrush(watermarkMask.value, point, watermarkBrushSize.value, watermarkMaskMode.value === "add");
+    triggerRef(watermarkMask);
     editorCanvas.value?.setPointerCapture(event.pointerId);
     drawEditor();
     return;
@@ -1571,6 +1572,7 @@ const moveSelection = (event: PointerEvent): void => {
     const point = pointInImage(event);
     if (!point) return;
     applyMaskBrush(watermarkMask.value, point, watermarkBrushSize.value, watermarkMaskMode.value === "add");
+    triggerRef(watermarkMask);
     drawEditor();
     return;
   }
@@ -1645,6 +1647,7 @@ const finishSelection = (event: PointerEvent): void => {
   selection.value = normalized;
   if (activeTool.value.id === "ai-watermark-remover" && watermarkMask.value) {
     applyMaskRectangle(watermarkMask.value, normalized, true);
+    triggerRef(watermarkMask);
     selection.value = null;
   }
   if (activeTool.value.id === "background-remover") processSelection();
