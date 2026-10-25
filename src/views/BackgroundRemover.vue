@@ -739,6 +739,7 @@
 </template>
 
 <script setup lang="ts">
+import { encodeWatermarkUpload } from "@/features/watermark-remover/watermarkUpload";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, triggerRef, watch } from "vue";
 import {
   editorCategories,
@@ -1820,7 +1821,7 @@ const runWatermarkRemoval = async (mode: "automatic" | "mask"): Promise<void> =>
       watermarkOriginalImage.value = original;
       watermarkMask.value = createWatermarkMask(original.width, original.height);
     }
-    const image = await encodePixelImageAsPng(original);
+    const image = await encodeWatermarkUpload(original);
     const mask = mode === "mask" ? await encodeWatermarkMask(watermarkMask.value!) : undefined;
     const task = await createWatermarkRemovalTask({ image, mask, mode });
     watermarkProgressLabel.value = "AI 正在识别与修复…";
