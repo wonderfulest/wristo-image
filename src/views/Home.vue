@@ -55,7 +55,7 @@
     <section class="local-section" aria-label="本地处理说明">
       <span class="local-number">02</span>
       <div><p class="local-kicker">LOCAL FIRST</p><h2>图片不必绕远路。</h2></div>
-      <p>常规编辑与导出直接在浏览器中完成；AI 去水印需登录 Wristo 并消耗积分，提交前显示本次费用；图片会临时发送到 Wristo 服务端处理。</p>
+      <p>常规编辑与导出直接在浏览器中完成。AI 点数仅在 Studio 使用；此工具已停止新的 AI 处理，历史任务仍可查询尚未过期的结果。</p>
       <RouterLink to="/editor">选择一张图片 <span>→</span></RouterLink>
     </section>
   </main>

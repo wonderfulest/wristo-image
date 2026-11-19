@@ -86,7 +86,7 @@ describe('ImageEditor', () => {
     expect(wrapper.get('[data-testid="reset-button"]').attributes('disabled')).toBeDefined()
   })
 
-  it('offers automatic AI removal and editable mask controls', async () => {
+  it('retains historical AI controls with new processing disabled', async () => {
     const wrapper = mount(ImageEditor)
     await uploadTestImage(wrapper)
 
@@ -96,7 +96,7 @@ describe('ImageEditor', () => {
     expect(wrapper.get('[data-testid="watermark-mask-mode-add"]').text()).toContain('画笔增加')
     expect(wrapper.get('[data-testid="watermark-mask-mode-erase"]').text()).toContain('橡皮减少')
     expect(wrapper.get('[data-testid="watermark-mask-submit"]').text()).toContain('按调整范围重新修复')
-    expect(wrapper.text()).toContain('图片会上传至 Wristo 服务端并由阿里云百炼处理')
+    expect(wrapper.text()).toContain('此工具已停止新的 AI 处理')
   })
 
   it('shows cutout output ratio and whitespace controls', () => {

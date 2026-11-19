@@ -3,26 +3,10 @@ import { createWatermarkRemovalTask, getWatermarkRemovalTask, waitForWatermarkRe
 
 describe('watermark removal API', () => {
   beforeEach(() => sessionStorage.setItem('wristo-image-token', 'test-token'))
-  it('submits automatic and mask tasks as multipart requests', async () => {
-    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ taskToken: 'token-1', status: 'pending' }), {
-      status: 200,
-      headers: { 'content-type': 'application/json' },
-    }))
-    const image = new File(['image'], 'image.png', { type: 'image/png' })
-    const mask = new Blob(['mask'], { type: 'image/png' })
-
-    await createWatermarkRemovalTask({ image, mode: 'mask', mask, expectedCreditCost: 3, requestId: 'test-request' }, fetcher)
-
-    const [url, request] = fetcher.mock.calls[0] as [string, RequestInit]
-    expect(url).toBe('/api/image-tools/watermark-removal/tasks')
-    expect(request.method).toBe('POST')
-    expect(new Headers(request.headers).get('Authorization')).toBe('Bearer test-token')
-    expect(new Headers(request.headers).get('X-AI-Request-Id')).toBe('test-request')
-    expect((request.body as FormData).get('expectedCreditCost')).toBe('3')
-    expect(request.body).toBeInstanceOf(FormData)
-    expect((request.body as FormData).get('mode')).toBe('mask')
-    expect((request.body as FormData).get('mask')).toBeInstanceOf(Blob)
-    expect(((request.body as FormData).get('mask') as Blob).size).toBe(4)
+  it.each(['automatic', 'mask'] as const)('rejects new %s requests without uploading or charging', async (mode) => {
+    const fetcher = vi.fn()
+    await expect(createWatermarkRemovalTask({ image: new Blob(['image']), mode, expectedCreditCost: 3, requestId: 'new-task' }, fetcher)).rejects.toThrow('此工具已停止新的 AI 处理')
+    expect(fetcher).not.toHaveBeenCalled()
   })
 
   it('polls until the task succeeds and returns the proxied result URL', async () => {

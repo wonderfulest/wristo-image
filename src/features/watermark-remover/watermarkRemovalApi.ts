@@ -23,12 +23,7 @@ export const createWatermarkRemovalTask = async (
   input: { image: Blob; mode: WatermarkRemovalMode; mask?: Blob; expectedCreditCost: number; requestId: string },
   fetcher: Fetcher = fetch,
 ): Promise<{ taskToken: string; status: WatermarkTaskState }> => {
-  const body = new FormData()
-  body.append('image', input.image)
-  body.append('mode', input.mode)
-  body.append('expectedCreditCost', String(input.expectedCreditCost))
-  if (input.mask) body.append('mask', input.mask)
-  return readJson(await fetcher(taskUrl(), { method: 'POST', body, headers: authHeaders({ 'X-AI-Request-Id': input.requestId }) }))
+  throw new Error('AI 点数仅在 Studio 使用；此工具已停止新的 AI 处理。')
 }
 
 export const getWatermarkRemovalTask = async (
@@ -56,9 +51,9 @@ export const waitForWatermarkRemoval = async (
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const status = await getWatermarkRemovalTask(token, fetcher)
     if (status.status === 'succeeded') return status
-    if (status.status === 'expired') throw new Error('AI 结果已过期，请重新发起编辑')
+    if (status.status === 'expired') throw new Error('AI 结果已过期，无法继续下载')
     if (status.status === 'failed') throw new Error(status.message || 'AI 去水印处理失败')
     await delay(options.intervalMs ?? 1500)
   }
-  throw new Error('任务仍在处理中，请点击继续查询；不要重新提交以免再次扣费')
+  throw new Error('任务仍在处理中，请点击继续查询')
 }
